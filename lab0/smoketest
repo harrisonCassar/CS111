@@ -1,0 +1,81 @@
+#!/bin/bash
+#shebang
+
+# NAME: Harrison Cassar
+# EMAIL: Harrison.Cassar@gmail.com
+# ID: 505114980
+
+passedtests=1
+
+# Test 1: Normal transferring of file from specified input and output files
+dd if=/dev/urandom of=tmp.txt bs=2000 count=16
+buildoutput=`./lab0 --input=tmp.txt --output=tmpout.txt`
+diffoutput=`diff tmp.txt tmpout.txt`
+
+if [[ -s "$diffoutput" || "$buildoutput" -ne 0 ]]
+then
+	passedtests=0
+fi
+
+# Test 2: Normal transferring of stdin to stdout
+cat tmp.txt | ./lab0 > tmpout.txt
+diffoutput=`diff tmp.txt tmpout.txt`
+
+if [[ $? -ne 0 || -s "$diffoutput" ]]
+then
+	passedtests=0
+fi
+
+# Test 3: Properly handling unrecognized argument
+./lab0 arg --input=tmp.txt
+
+if [[ $? -ne 1 ]]
+then
+        passedtests=0
+fi
+
+# Test 4: Intentionally causes segfault when option specified
+./lab0 --segfault
+
+if [[ $? -ne 139 ]]
+then
+	passedtests=0
+fi
+
+# Test 5: Catch intentionally-caused segfault when both options are specified
+./lab0 --segfault --catch
+
+if [[ $? -ne 4 ]]
+then
+	passedtests=0
+fi
+
+# Test 6: Correct handling of non-existant specified input file
+rm a.txt
+./lab0 --input=a.txt
+
+if [[ $? -ne 2 ]]
+then
+	passedtests=0
+fi
+
+# Test 7: Correct handling of non-writable output file
+chmod 444 tmpout.txt
+./lab0 --input=tmp.txt --output=tmpout.txt
+
+if [[ $? -ne 3 ]]
+then
+        passedtests=0
+fi
+
+chmod 777 tmpout.txt
+
+# Clean up tmp files made during smoke tests
+rm tmp.txt tmpout.txt
+
+if [ $passedtests -ne 1 ]
+then
+	printf "\nBuilt executable failed to pass all smoke tests.\n"
+else
+	printf "\nBuilt executable successfully passed all smoke tests.\n"
+fi

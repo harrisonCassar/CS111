@@ -1,0 +1,32 @@
+NAME: Harrison Cassar
+EMAIL: Harrison.Cassar@gmail.com
+ID: 505114980
+
+Included Files:
+-lab0.c: C source code for lab0, which fundamentally copies stdin to stdout (unless input/output file is specified),
+with some other functionalities.
+-Makefile: Makefile with targets default (build lab0 executable), clean (cleans directory by deleting all files created by Makefile), dist (builds distribution tarball), and check (peforms smoke tests on lab0 executable).
+-smoketest: used by Makefile's "check" target to perform smoke tests on lab0 executable.
+-backtrace.png: screenshot of gdb output from segfault and its associated stack-trace output from using gdb's backtrace command
+-breakpoint.png: screenshot of gdb output from setting breakpoint at variable assigment causing segfault and inspection of NULL pointer variable being dereferenced in assignment
+
+Smoke-Test Cases:
+-Test 1: Normal transferring of file from specified input and output files
+-Test 2: Normal transferring of stdin to stdout
+-Test 3: Properly handling unrecognized argument
+-Test 4: Intentionally causes segfault when option specified
+-Test 5: Catch intentionally-caused segfault when both options are specified
+-Test 6: Correct handling of non-existant specified input file
+-Test 7: Correct handling of non-writable output file
+
+Resources:
+-man pages for open, creat, close, dup, read, write, exit, signal
+-man pages for perror, errno
+-man pages for getopt, getopt_long, getopt.h
+-GNU C library documentation, specifically section 25.2 "Parsing program options using getopt". Subsections 2 and 4 were used as example uses of getopt and getopt_long (https://www.gnu.org/software/libc/manual/html_node/Example-of-Getopt.html#Example-of-Getopt).
+-Referenced example use code of signal(2) function from tutorialspoint.com (https://www.tutorialspoint.com/c_standard_library/c_function_signal.htm)
+-Referenced Caltech's CS11 article on how to properly format a usage statement with conventions (http://courses.cms.caltech.edu/cs11/material/general/usage.html)
+-Referenced multiple forum posts/user replies describing that a segmentation fault has exit code of 139 (this was used for the sake of smoke testing)
+
+Extra Info:
+-confirmed proper version of gdb, gcc, and make by performing "which <command>" and "<command> -v".

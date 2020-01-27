@@ -1,0 +1,18 @@
+NAME: Harrison Cassar
+EMAIL: Harrison.Cassar@gmail.com
+ID: 505114980
+
+Included Files:
+-lab1b-client.c: 
+-lab1b-server.c: 
+-Makefile: Makefile with targets default (build lab1b-client and lab1b-server executables), client (builds only lab1b-client executable), server (builds only lab1b-server executable), clean (cleans directory by deleting all files created by Makefile), and dist (builds distribution tarball).
+
+Resources:
+-man pages for termios, tcgetattr, tcsetattr
+-man pages for errno, strerror
+-man pages for fork, exec
+-man pages for waitpid
+-man pages for strtol
+-man pages for socket, gethostbyname, getaddrinfo
+-man pages for connect, bind, listen, accept
+-man pages for memcpy, bzero

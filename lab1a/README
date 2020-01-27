@@ -1,0 +1,14 @@
+NAME: Harrison Cassar
+EMAIL: Harrison.Cassar@gmail.com
+ID: 505114980
+
+Included Files:
+-lab1a.c: C source code for lab1a executable, which fundamentally stands in place of the master pty, termios, and slave pty as the interface between the console and the shell.
+-Makefile: Makefile with targets default (build lab1a executable), clean (cleans directory by deleting all files created by Makefile), and dist (builds distribution tarball).
+
+Resources:
+-man pages for termios, tcgetattr, tcsetattr
+-man pages for errno, strerror
+-man pages for fork, exec
+-man pages for waitpid
+
