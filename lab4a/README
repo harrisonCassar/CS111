@@ -1,0 +1,11 @@
+NAME: Harrison Cassar
+EMAIL: Harrison.Cassar@gmail.com
+ID: 505114980
+
+Included Files:
+-my_beaglebone.jpg: selfie of me (Harrison Cassar) holding my assembled Beaglebone (showing the front of the board)
+-connected.png: screenshot of a USB terminal session connected to my Beaglebone from my computer, showing that I gave it a hostname and configured network access
+-copy.png: screenshot from a local session in which I copy a hello world program from my laptop/desktop to my Beaglebone
+-build_run.png: screenshot from a WIFI SSH session in which I build and run a trivial (hello world) program
+-git.png: screenshot from a WIFI SSH session in which I installed git and cloned a repository
+-Makefile: Makefile with target dist (builds distribution tarball)

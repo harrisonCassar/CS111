@@ -3,8 +3,8 @@ EMAIL: Harrison.Cassar@gmail.com
 ID: 505114980
 
 Included Files:
--lab1b-client.c: 
--lab1b-server.c: 
+-lab1b-client.c: C source code for lab1b-client executable, which fundamentally manages input from terminal and socket, sending terminal input to socket for transmission to a remote shell process, and sending socket output to the terminal display. Supports compression.
+-lab1b-server.c: C source code for lab1b-server executable, which fundamentally manages input from socket and shell, sending output from a socket connected to a client to a child shell process, and sending shell process's output to the socket for tranmission to the remote terminal. Supports compression.
 -Makefile: Makefile with targets default (build lab1b-client and lab1b-server executables), client (builds only lab1b-client executable), server (builds only lab1b-server executable), clean (cleans directory by deleting all files created by Makefile), and dist (builds distribution tarball).
 
 Resources:
@@ -16,3 +16,4 @@ Resources:
 -man pages for socket, gethostbyname, getaddrinfo
 -man pages for connect, bind, listen, accept
 -man pages for memcpy, bzero
+-man pages and usage example documenation for zlib

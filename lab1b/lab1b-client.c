@@ -14,6 +14,9 @@
 #include <sys/types.h>
 #include <netdb.h>
 #include <poll.h>
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <zlib.h>
 
 /* Globals */
 
@@ -23,18 +26,26 @@
 int FL_debug = 0;
 int FL_specifiedPort = 0;
 int FL_quitReady = 0;
+int FL_log = 0;
+int FL_compress = 0;
 
 //Others
-char* raw_port;
+char* raw_port = NULL;
+char* logfile = NULL;
+int fd_log;
 int port;
 int socketfd;
 
 struct termios original;
+z_stream defstream;
+z_stream infstream;
 
 struct option long_options[] =
 {
 	{"port", required_argument, 0, 'p'},
 	{"debug", no_argument, 0, 'd'},
+	{"log", required_argument, 0, 'l'},
+	{"compress", no_argument, 0, 'c'},
 	{0, 0, 0, 0} //last element of long_options array must contain all 0's (end)
 };
 
@@ -49,10 +60,41 @@ void handleTerminalInput();
 void handleSocketInput();
 int protected_socket(int socket_family, int socket_type, int protocol);
 int protected_poll(struct pollfd *fds, nfds_t nfds, int timeout);
+int protected_open(const char* filepath, int flags, mode_t mode);
+void protected_close(int fd);
+void processToTerminal(char* buf, int size);
+void prepareForExit();
 
 int main(int argc, char* argv[])
 {
+    //parse options
 	parseOptions(argc,argv);
+	
+	//init (de)compression streams
+	if (FL_compress == 1)
+	{
+		defstream.zalloc = Z_NULL;
+	    defstream.zfree = Z_NULL;
+	    defstream.opaque = Z_NULL;
+
+	    int ret = deflateInit(&defstream, Z_DEFAULT_COMPRESSION);
+	    if (ret != Z_OK)
+	    {
+	    	fprintf(stderr, "Error while attempting to initialize deflate stream.\n");
+	    	exit(1);
+	    }
+
+	    infstream.zalloc = Z_NULL;
+	    infstream.zfree = Z_NULL;
+	    infstream.opaque = Z_NULL;
+
+	    ret = inflateInit(&infstream);
+	    if (ret != Z_OK)
+	    {
+	    	fprintf(stderr, "Error while attempting to initialize inflate stream.\n");
+	    	exit(1);
+	    }
+	}
 
 	//save original terminal modes for restoring at exit, and set modified modes
 	saveTerminal();
@@ -187,6 +229,13 @@ void parseOptions(int argc, char** argv)
 			case 'd':
 				FL_debug = 1;
 				break;
+			case 'l':
+				FL_log = 1;
+				logfile = optarg;
+				break;
+			case 'c':
+				FL_compress = 1;
+				break;
 		}
 	}
 
@@ -218,6 +267,14 @@ void parseOptions(int argc, char** argv)
 	{
 		fprintf(stderr,"Running in debug mode.\n");
 		fprintf(stderr,"Specified port is: %d\n", port);
+	}
+
+	if (FL_log == 1)
+	{
+		fd_log = protected_open(logfile,O_WRONLY|O_CREAT|O_TRUNC, S_IRWXU|S_IRWXG|S_IRWXO);
+
+		if (FL_debug == 1)
+			fprintf(stderr,"Opened specified log file of '%s'\n", logfile);
 	}
 
 	//check if non-option arguments were specified (not supported)
@@ -258,7 +315,7 @@ void setTerminal()
     }
 
     //modifications made, so whenever exit, must restore terminal modes
-    atexit(restoreTerminal);
+    atexit(prepareForExit);
 
 	//check to make sure ALL changes were made
 	struct termios modified_applied;
@@ -278,8 +335,20 @@ void setTerminal()
         fprintf(stderr,"Set all specified changes to terminal modes...\r\nOperating in 'character-at-a-time, no echo' mode.\r\n");
 }
 
-void restoreTerminal()
+void prepareForExit()
 {
+	//end (de)compression streams
+	if (FL_compress == 1)
+	{
+		deflateEnd(&defstream);
+    	inflateEnd(&infstream);
+	}
+	
+	//close log file
+	if (FL_log == 1)
+		protected_close(fd_log);
+
+	//restore terminal
 	if (tcsetattr(0,TCSANOW,&original) == -1)
 	{
 		fprintf(stderr,"Error while attempting to restore terminal modes: %s\r\n", strerror(errno));
@@ -365,7 +434,8 @@ void handleTerminalInput()
 
 	//read bytes from terminal input
 	bytesRead = protected_read(0,buf,BUFSIZE);	
-	
+
+	//send un-compressed bytes to stdout for display
 	for (int i = 0; i < bytesRead; i++)
 	{
 		if (FL_debug == 1)
@@ -373,31 +443,85 @@ void handleTerminalInput()
 
 		//check for escape sequence
 		if (buf[i] == 0x04)
-		{
 			protected_write(1,escape,4);
-			protected_write(socketfd,buf+i,1);
-		}
 		
 		//check for interrupt character
 		else if (buf[i] == 0x03)
-		{
 			protected_write(1,interrupt,4);
-			protected_write(socketfd,buf+i,1);
-		}
 		
 		//process newline (if present) and write to output
 		else if (buf[i] == 0x0D || buf[i] == 0x0A)
-        {
 			protected_write(1,newline,2);
-			//protected_write(socketfd,newline+1,1); //taken out, as this processing will be done on server side
-			protected_write(socketfd,buf+i,1);
-		}
-		
+			
 		//write any other character normally
 		else
-		{
 			protected_write(1,buf+i,1);
-			protected_write(socketfd,buf+i,1);
+	}
+	
+	//send compressed or uncompressed bytes to socket for transmission
+	if (FL_compress == 1)
+	{
+		char tmp[BUFSIZE];
+
+		//compress bytes and send to socket
+		defstream.avail_in = (uInt) bytesRead;
+	    defstream.next_in = (Bytef *) buf;
+
+	    while (defstream.avail_in != 0)
+	    {	
+	    	defstream.avail_out = (uInt) BUFSIZE;
+	    	defstream.next_out = (Bytef *) tmp;
+	    	
+	    	if (FL_debug == 1)
+	    		fprintf(stderr, "Compression loop iteration.\n");
+
+	    	int def_ret = deflate(&defstream, Z_SYNC_FLUSH);
+			if (def_ret != Z_OK)
+	    	{
+	    		fprintf(stderr, "Error while attempting to deflate terminal input.\n");
+	    		exit(1);
+	    	}
+
+	    	//send off to socket
+	    	if (defstream.avail_out == 0)
+	    	{
+	    		protected_write(socketfd,tmp,BUFSIZE);
+
+	    		if (FL_log == 1)
+				{
+					char str[BUFSIZE];
+					int bytesToWrite = sprintf(str, "SENT %d bytes: ", BUFSIZE);
+					protected_write(fd_log,str,bytesToWrite);
+					protected_write(fd_log,tmp,BUFSIZE);
+					protected_write(fd_log,"\n",1);
+				}
+	    	}
+	    	else
+	    	{
+	    		protected_write(socketfd,tmp,BUFSIZE-defstream.avail_out);
+	    	
+	    		if (FL_log == 1)
+				{
+					char str[BUFSIZE];
+					int bytesToWrite = sprintf(str, "SENT %d bytes: ", BUFSIZE-defstream.avail_out);
+					protected_write(fd_log,str,bytesToWrite);
+					protected_write(fd_log,tmp,BUFSIZE-defstream.avail_out);
+					protected_write(fd_log,"\n",1);
+				}
+	    	}
+	    }
+	}
+	else //no compression, write un-compressed bytes to socket
+	{
+		protected_write(socketfd,buf,bytesRead);
+
+		if (FL_log == 1)
+		{
+			char str[BUFSIZE];
+			int bytesToWrite = sprintf(str, "SENT %d bytes: ", bytesRead);
+			protected_write(fd_log,str,bytesToWrite);
+			protected_write(fd_log,buf,bytesRead);
+			protected_write(fd_log,"\n",1);
 		}
 	}
 }
@@ -409,22 +533,82 @@ void handleSocketInput()
 
 	int bytesRead;
 
-    char newline[2] = {0x0D,0x0A};
-	char escape[4] = {'^','D',0x0D,0x0A};
+    //char newline[2] = {0x0D,0x0A};
+	//char escape[4] = {'^','D',0x0D,0x0A};
 	//char interrupt[4] = {'^','C',0x0D,0x0A};
 
 	char buf[BUFSIZE];	
 
-	//read bytes from terminal input
+	//read bytes from socket input
 	bytesRead = protected_read(socketfd,buf,BUFSIZE);	
 	
 	if (FL_debug == 1)
 		fprintf(stderr,"Client bytesRead from socket: %d\r\n", bytesRead);
 
-	for (int i = 0; i < bytesRead; i++)
+	if (bytesRead == 0)
+		FL_quitReady = 1;
+	else
 	{
-		//LOG OPTION NEEDS TO OUTPUT STUFF HERE!
+		//send compressed received bytes to log file
+		if (FL_log == 1)
+		{
+			char str[BUFSIZE];
+			int bytesToWrite = sprintf(str, "RECEIVED %d bytes: ", bytesRead);
+			protected_write(fd_log,str,bytesToWrite);
+			protected_write(fd_log,buf,bytesRead);
+			protected_write(fd_log,"\n",1);
+		}
 
+		//decompress bytes
+		if (FL_compress == 1)
+		{
+			char tmp[BUFSIZE];
+
+			//prepare for inflation
+		    infstream.avail_in = (uInt) bytesRead; // size of input
+		    infstream.next_in = (Bytef *) buf; // input char array
+
+		    while (infstream.avail_in != 0)
+		    {
+		    	infstream.avail_out = (uInt) BUFSIZE;
+		    	infstream.next_out = (Bytef *) tmp;
+
+		    	if (FL_debug == 1)
+	    			fprintf(stderr, "Decompression loop iteration.\n");
+
+		    	int inf_ret = inflate(&infstream, Z_SYNC_FLUSH);
+				if (inf_ret != Z_OK)
+		    	{
+	    			fprintf(stderr, "Error while attempting to inflate input from socket.\n");
+	    			exit(1);
+	    		}
+
+	    		int bytesToProcess;
+		    	
+		    	if (infstream.avail_out == 0)
+		    		bytesToProcess = BUFSIZE;
+		    	else
+		    		bytesToProcess = BUFSIZE-infstream.avail_out;
+
+		    	//process inflated bytes
+		    	processToTerminal(tmp,bytesToProcess);
+			}
+		}
+		else //no compression expected on socket bytes
+		{
+			//process regular bytes
+			processToTerminal(buf,bytesRead);
+		}
+	}
+}
+
+void processToTerminal(char* buf, int size)
+{
+	char newline[2] = {0x0D,0x0A};
+	char escape[4] = {'^','D',0x0D,0x0A};
+
+	for (int i = 0; i < size; i++)
+	{
 		//check for escape sequence
 		if (buf[i] == 0x04)
 			protected_write(1,escape,4);
@@ -437,9 +621,6 @@ void handleSocketInput()
 		else
 			protected_write(1,buf+i,1);
 	}
-
-	if (bytesRead == 0)
-		FL_quitReady = 1;
 }
 
 int protected_socket(int socket_family, int socket_type, int protocol)
@@ -509,4 +690,87 @@ int protected_poll(struct pollfd *fds, nfds_t nfds, int timeout)
 	}
 
 	return ret;
+}
+
+int protected_open(const char* filepath, int flags, mode_t mode)
+{
+	int fd = open(filepath, flags, mode);
+	if (fd == -1)
+	{
+		//error has occured, check errno
+		switch (errno)
+		{
+			case EACCES:
+				fprintf(stderr,"Attempted open of specified file '%s' with option '--log' failed because of inability to request access to file, or search permission denied for one of the directories in the file's path, or file did not exist yet and write access is not allowed in parent directory.\n", filepath);
+				break;
+			case EFAULT:
+				fprintf(stderr,"Attempted open of specified file '%s' with option '--log' failed because file's path points to outside your accessible address space.\n", filepath);
+				break;
+			case EINTR:
+				fprintf(stderr,"Attempted open of specified file '%s' with option '--log' failed because open call interrupted by a signal handler while blocked waiting to complete an open of a slow device.\n", filepath);
+				break;
+			case ELOOP:
+				fprintf(stderr,"Attempted open of specified file '%s' with option '--log' failed because too many symbolic links were encountered in resolving the file's path.\n", filepath);
+				break;
+			case EMFILE:
+				fprintf(stderr,"Attempted open of specified file '%s' with option '--log' failed because the per-process limit on the number of open file descriptors has been reached.\n", filepath);
+				break;
+			case ENFILE:
+				fprintf(stderr,"Attempted open of specified file '%s' with option '--log' failed because the system-wide limit on the total number of open files has been reached.\n", filepath);
+				break;
+			case ENAMETOOLONG:
+				fprintf(stderr,"Attempted open of specified file '%s' with option '--log' failed because file's path was too long.\n", filepath);
+				break;
+			case ENODEV:
+				fprintf(stderr,"Attempted open of specified file '%s' with option '--log' failed because file's path refers to a device-special file and no corresponding device exists.\n", filepath);
+				break;
+			case ENOENT:
+				fprintf(stderr,"Attempted open of specified file '%s' with option '--log' failed because file does not exist or a directory component in the file's path does not exist or is a dangling symbolic link.\n", filepath);
+				break;
+			case ENOMEM:
+				fprintf(stderr,"Attempted open of specified file '%s' with option '--log' failed because either the file is a FIFO, but memory for the FIFO buffer can't be allocated because the per-user hard limit on memory allocation for pipes has been reached and the caller is not privileged or insufficient kernel memory was available.\n", filepath);
+				break;
+			case ENOTDIR:
+				fprintf(stderr,"Attempted open of specified file '%s' with option '--log' failed because a component used as a directory in the file's path is not a directory.\n", filepath);
+				break;
+			case ENXIO:
+				fprintf(stderr,"Attempted open of specified file '%s' with option '--log' failed because the file is a device-special file and no corresponding device exists or file is a UNIX domain socket.\n", filepath);
+				break;
+			case EOVERFLOW:
+				fprintf(stderr,"Attempted open of specified file '%s' with option '--log' failed because file's path refers to a regular file that is too large to be opened.\n", filepath);
+				break;
+			case EPERM:
+				fprintf(stderr,"Attempted open of specified file '%s' with option '--log' failed because the operation was prevented by a file seal.\n", filepath);
+				break;
+			default:
+				fprintf(stderr,"Attempted open of specified file '%s' with option '--log' failed with an unrecognized error.\n", filepath);
+				break;
+		}
+
+		exit(1);
+	}
+
+	return fd;
+}
+
+void protected_close(int fd)
+{
+	if (close(fd) == -1)
+	{
+		fprintf(stderr, "Error: %s; ", strerror(errno));
+		switch (errno)
+		{
+			case EINTR:
+				fprintf(stderr,"Attempted closing of fd '%d' failed because call was interrupted by a signal.\r\n", fd);
+				break;
+			case EIO:
+				fprintf(stderr,"Attempted closing of fd '%d' failed because an I/O error occured.\r\n", fd);
+				break;
+			default:
+				fprintf(stderr,"Attempted closing of fd '%d' failed with an unrecognized error.\r\n", fd);
+				break;
+		}		
+		
+		exit(1);
+	}
 }

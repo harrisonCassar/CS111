@@ -14,6 +14,7 @@
 #include <signal.h>
 #include <poll.h>
 #include <sys/wait.h>
+#include <zlib.h>
 
 /* Globals */
 
@@ -25,6 +26,7 @@ int FL_specifiedPort = 0;
 int FL_caughtSIGPIPE = 0;
 int FL_forwardPipeClosed = 0;
 int FL_quitReady = 0;
+int FL_compress = 0;
 
 //Others
 char* raw_port;
@@ -36,10 +38,14 @@ int pid;
 int forward_pipefd[2];
 int backward_pipefd[2];
 
+z_stream defstream;
+z_stream infstream;
+
 struct option long_options[] =
 {
 	{"port", required_argument, 0, 'p'},
 	{"debug", no_argument, 0, 'd'},
+	{"compress", no_argument, 0, 'c'},
 	{0, 0, 0, 0} //last element of long_options array must contain all 0's (end)
 };
 
@@ -60,16 +66,43 @@ int protected_write(int fd, const char* buf, size_t size);
 void protected_exec();
 void handleShellInput();
 void handleSocketInput();
-void termSocket();
+void processToShell(char* buf, int size);
+void cleanup();
 
 int main(int argc, char* argv[])
 {
 	parseOptions(argc,argv);
 
+	//init (de)compression streams
+	if (FL_compress == 1)
+	{
+		defstream.zalloc = Z_NULL;
+	    defstream.zfree = Z_NULL;
+	    defstream.opaque = Z_NULL;
+
+	    int ret = deflateInit(&defstream, Z_DEFAULT_COMPRESSION);
+	    if (ret != Z_OK)
+	    {
+	    	fprintf(stderr, "Error while attempting to initialize deflate stream.\n");
+	    	exit(1);
+	    }
+
+	    infstream.zalloc = Z_NULL;
+	    infstream.zfree = Z_NULL;
+	    infstream.opaque = Z_NULL;
+
+	    ret = inflateInit(&infstream);
+	    if (ret != Z_OK)
+	    {
+	    	fprintf(stderr, "Error while attempting to initialize inflate stream.\n");
+	    	exit(1);
+	    }
+	}
+
 	//set up socket
 	socketfd = protected_socket(AF_INET,SOCK_STREAM, 0);
 
-	atexit(termSocket);
+	atexit(cleanup);
 
 	//bind socket with port
 	struct hostent* tmp = gethostbyname("localhost");
@@ -313,6 +346,9 @@ void parseOptions(int argc, char** argv)
 			case 'd':
 				FL_debug = 1;
 				break;
+			case 'c':
+				FL_compress = 1;
+				break;
 		}
 	}
 
@@ -498,31 +534,53 @@ void handleShellInput()
 	int bytesRead;
 
     //char newline[2] = {0x0D,0x0A};
-	char escape[4] = {'^','D',0x0D,0x0A};
+	//char escape[4] = {'^','D',0x0D,0x0A};
 
 	char buf[BUFSIZE];	
 
-	//read bytes from terminal input
+	//read bytes from shell input
 	bytesRead = protected_read(backward_pipefd[0],buf,BUFSIZE);	
 	
+	//check for 0x04 in bytes
 	for (int i = 0; i < bytesRead; i++)
 	{
-		//check for escape sequence
 		if (buf[i] == 0x04)
-		{
-			protected_write(clientconnection_socketfd,escape,4);
-
 			FL_quitReady = 1;
-		}
-		
-		//process newline (if present) and write to output //TAKEN OUT, as this processing should be done on client-side
-		//else if (buf[i] == 0x0D || buf[i] == 0x0A)
-			//protected_write(clientconnection_socketfd,newline,2);
-		
-		//write any other character normally
-		else
-			protected_write(clientconnection_socketfd,buf+i,1);
 	}
+
+	//send compressed/uncompressed shell output to socket
+	if (FL_compress == 1)
+	{
+		char tmp[BUFSIZE];
+
+		//compress bytes and send to socket
+		defstream.avail_in = (uInt) bytesRead;
+	    defstream.next_in = (Bytef *) buf;
+
+	    while (defstream.avail_in != 0)
+	    {	
+	    	defstream.avail_out = (uInt) BUFSIZE;
+	    	defstream.next_out = (Bytef *) tmp;
+	    	
+	    	if (FL_debug == 1)
+	    		fprintf(stderr, "Compression loop iteration.\n");
+
+	    	int def_ret = deflate(&defstream, Z_SYNC_FLUSH);
+			if (def_ret != Z_OK)
+	    	{
+	    		fprintf(stderr, "Error while attempting to deflate terminal input.\n");
+	    		exit(1);
+	    	}
+
+	    	//send off to socket
+	    	if (defstream.avail_out == 0)
+	    		protected_write(clientconnection_socketfd,tmp,BUFSIZE);
+	    	else
+	    		protected_write(clientconnection_socketfd,tmp,BUFSIZE-defstream.avail_out);
+	    }
+	}
+	else //no compression before sending
+		protected_write(clientconnection_socketfd,buf,bytesRead);
 }
 
 void handleSocketInput()
@@ -532,14 +590,57 @@ void handleSocketInput()
 
 	int bytesRead;
 
-    char newline[2] = {0x0D,0x0A};
-
 	char buf[BUFSIZE];	
 
 	//read bytes from terminal input
 	bytesRead = protected_read(clientconnection_socketfd,buf,BUFSIZE);	
 	
-	for (int i = 0; i < bytesRead; i++)
+	//decompress bytes before sending to shell
+	if (FL_compress == 1)
+	{
+		char tmp[BUFSIZE];
+
+		//prepare for inflation
+		infstream.avail_in = (uInt) bytesRead; // size of input
+		infstream.next_in = (Bytef *) buf; // input char array
+
+		while (infstream.avail_in != 0)
+	    {
+	    	infstream.avail_out = (uInt) BUFSIZE;
+	    	infstream.next_out = (Bytef *) tmp;
+
+	    	if (FL_debug == 1)
+    			fprintf(stderr, "Decompression loop iteration.\n");
+
+	    	int inf_ret = inflate(&infstream, Z_SYNC_FLUSH);
+			if (inf_ret != Z_OK)
+	    	{
+    			fprintf(stderr, "Error while attempting to inflate input from socket.\n");
+    			exit(1);
+    		}
+
+    		int bytesToProcess;
+	    	
+	    	if (infstream.avail_out == 0)
+	    		bytesToProcess = BUFSIZE;
+	    	else
+	    		bytesToProcess = BUFSIZE-infstream.avail_out;
+
+	    	//process inflated bytes
+			processToShell(tmp,bytesToProcess);
+		}
+	}
+	else //no need to decompress before sending to shell
+	{
+		processToShell(buf,bytesRead);
+	}
+}
+
+void processToShell(char* buf, int size)
+{
+	char newline[2] = {0x0D,0x0A};
+
+	for (int i = 0; i < size; i++)
 	{
 		if (FL_debug == 1)
 			fprintf(stderr,"Server character read from socket: %d\r\n",buf[i]);
@@ -687,8 +788,15 @@ int protected_write(int fd, const char* buf, size_t size)
 }
 
 //BETTER ERROR DESCRIPTIONS
-void termSocket()
+void cleanup()
 {
+	//end (de)compression streams
+	if (FL_compress == 1)
+	{
+		deflateEnd(&defstream);
+    	inflateEnd(&infstream);
+	}
+
 	if (shutdown(clientconnection_socketfd,SHUT_RDWR) == -1)
 	{
 		fprintf(stderr, "Error while attempting shutdown of socket with fd %d: %s; ", socketfd, strerror(errno));

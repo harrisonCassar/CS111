@@ -7,18 +7,19 @@ CC = gcc
 
 #compiler flags:
 # -g    adds debugging information to the executable file
-#  # -Wall turns on most, but not all, compiler warnings
+# -Wall turns on most, but not all, compiler warnings
 # -Wextra enables some extra warning flags not enabled by -Wall
 CFLAGS = -Wall -Wextra -g
+LIBRARIES = -lz
 
 # build lab0 executable
 default: client server
 
 client: lab1b-client.c
-	$(CC) $(CFLAGS) -o lab1b-client lab1b-client.c
+	$(CC) $(CFLAGS) -o lab1b-client lab1b-client.c $(LIBRARIES)
 
 server: lab1b-server.c
-	$(CC) $(CFLAGS) -o lab1b-server lab1b-server.c
+	$(CC) $(CFLAGS) -o lab1b-server lab1b-server.c $(LIBRARIES)
 
 # delete all files created by the Makefile, and return the directory to its freshly untared state
 clean:

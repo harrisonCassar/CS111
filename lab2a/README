@@ -1,0 +1,69 @@
+NAME: Harrison Cassar
+EMAIL: Harrison.Cassar@gmail.com
+ID: 505114980
+
+Included Files:
+-
+-Makefile: Makefile with target dist (builds distribution tarball)
+
+Resources:
+-provided pthreads tutorial: https://computing.llnl.gov/tutorials/pthreads/
+-man pages for clock_gettime(2)
+-documentation for GCC atomic builtins
+-man pages and user manual for gnuplot(1)
+
+/* Questions */
+
+QUESTION 2.1.1 - causing conflicts:
+Results:
+//100 iterations
+./lab2_add --threads=2 --iterations=100 => add-none,2,100,400,158642,396,0
+./lab2_add --threads=4 --iterations=100 => add-none,4,100,800,215795,269,0
+./lab2_add --threads=8 --iterations=100 => add-none,8,100,1600,406157,253,0
+./lab2_add --threads=16 --iterations=100 => add-none,16,100,3200,694624,217,0
+
+//1000 iterations
+./lab2_add --threads=2 --iterations=1000 => add-none,2,1000,4000,191266,47,0
+./lab2_add --threads=4 --iterations=1000 => add-none,4,1000,8000,232128,29,0
+./lab2_add --threads=8 --iterations=1000 => add-none,8,1000,16000,386345,24,0
+./lab2_add --threads=16 --iterations=1000 => add-none,16,1000,32000,588292,18,0
+
+//10000 iterations
+./lab2_add --threads=2 --iterations=10000 => add-none,2,10000,40000,197987,4,0
+./lab2_add --threads=4 --iterations=10000 => add-none,4,10000,80000,236517,2,0
+./lab2_add --threads=8 --iterations=10000 => add-none,8,10000,160000,418431,2,0
+./lab2_add --threads=16 --iterations=10000 => add-none,16,10000,320000,670387,2,0
+
+//100000 iterations
+./lab2_add --threads=2 --iterations=100000 => add-none,2,100000,400000,231274,0,0
+./lab2_add --threads=4 --iterations=100000 => add-none,4,100000,800000,225050,0,0
+./lab2_add --threads=8 --iterations=100000 => add-none,8,100000,1600000,389217,0,0
+./lab2_add --threads=16 --iterations=100000 => add-none,16,100000,3200000,673374,0,0
+
+Why does it take many iterations before errors are seen?
+-The time it takes to create a thread may be greater than the time it takes the previously newly-created thread to finish its execution (therefore, guarenteed no conflicts). Additionally, the chances of a context switch occuring right in between the two instructions within the given "add()" function is really small, and therefore by increasing the number of iterations, we have a higher chance of observing this race condition.
+
+Why does a significantly smaller number of iterations so seldom fail?
+-Significantly smaller number of iterations so seldom fails because less iterations means less liklihood to fail. More iterations mean a longer execution time, and therefore more threads are in the "ready" state for execution, competing for execution time on the processor. Subsequently, more threads competing means more potential issue of conflicts when accessing the shared "counter" variable.
+
+
+QUESTION 2.1.2 - cost of yielding:
+Results:
+//
+./
+./
+./
+./
+
+//
+./
+......
+
+Why are the --yield runs so much slower?
+-
+
+Where is the additional time going?
+-
+
+Is it possible to get valid per-operation timings if we are using the --yield option? If so, explain how. If not, explain why not.
+-
