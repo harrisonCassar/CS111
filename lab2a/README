@@ -16,29 +16,25 @@ Resources:
 
 QUESTION 2.1.1 - causing conflicts:
 Results:
-//100 iterations
-./lab2_add --threads=2 --iterations=100 => add-none,2,100,400,158642,396,0
-./lab2_add --threads=4 --iterations=100 => add-none,4,100,800,215795,269,0
-./lab2_add --threads=8 --iterations=100 => add-none,8,100,1600,406157,253,0
-./lab2_add --threads=16 --iterations=100 => add-none,16,100,3200,694624,217,0
+add-none,2,100,400,189765,474,0
+add-none,4,100,800,221959,277,0
+add-none,8,100,1600,340446,212,0
+add-none,12,100,2400,441642,184,0
 
-//1000 iterations
-./lab2_add --threads=2 --iterations=1000 => add-none,2,1000,4000,191266,47,0
-./lab2_add --threads=4 --iterations=1000 => add-none,4,1000,8000,232128,29,0
-./lab2_add --threads=8 --iterations=1000 => add-none,8,1000,16000,386345,24,0
-./lab2_add --threads=16 --iterations=1000 => add-none,16,1000,32000,588292,18,0
+add-none,2,1000,4000,201990,50,0
+add-none,4,1000,8000,185701,23,0
+add-none,8,1000,16000,333162,20,-518
+add-none,12,1000,24000,421701,17,0
 
-//10000 iterations
-./lab2_add --threads=2 --iterations=10000 => add-none,2,10000,40000,197987,4,0
-./lab2_add --threads=4 --iterations=10000 => add-none,4,10000,80000,236517,2,0
-./lab2_add --threads=8 --iterations=10000 => add-none,8,10000,160000,418431,2,0
-./lab2_add --threads=16 --iterations=10000 => add-none,16,10000,320000,670387,2,0
+add-none,2,10000,40000,599449,14,31
+add-none,4,10000,80000,1266121,15,5249
+add-none,8,10000,160000,2345221,14,4881
+add-none,12,10000,240000,3488898,14,196
 
-//100000 iterations
-./lab2_add --threads=2 --iterations=100000 => add-none,2,100000,400000,231274,0,0
-./lab2_add --threads=4 --iterations=100000 => add-none,4,100000,800000,225050,0,0
-./lab2_add --threads=8 --iterations=100000 => add-none,8,100000,1600000,389217,0,0
-./lab2_add --threads=16 --iterations=100000 => add-none,16,100000,3200000,673374,0,0
+add-none,2,100000,400000,4096774,10,26039
+add-none,4,100000,800000,11884822,14,-8656
+add-none,8,100000,1600000,22179917,13,-8745
+add-none,12,100000,2400000,32810603,13,-27634
 
 Why does it take many iterations before errors are seen?
 -The time it takes to create a thread may be greater than the time it takes the previously newly-created thread to finish its execution (therefore, guarenteed no conflicts). Additionally, the chances of a context switch occuring right in between the two instructions within the given "add()" function is really small, and therefore by increasing the number of iterations, we have a higher chance of observing this race condition.
@@ -49,21 +45,53 @@ Why does a significantly smaller number of iterations so seldom fail?
 
 QUESTION 2.1.2 - cost of yielding:
 Results:
-//
-./
-./
-./
-./
+add-yield-none,2,100,400,381924,954,12
+add-yield-none,4,100,800,402530,503,83
+add-yield-none,8,100,1600,525119,328,130
+add-yield-none,12,100,2400,614148,255,233
 
-//
-./
-......
+add-yield-none,2,1000,4000,2024379,506,31
+add-yield-none,4,1000,8000,2098028,262,100
+add-yield-none,8,1000,16000,2250864,140,142
+add-yield-none,12,1000,24000,2807647,116,202
+
+add-yield-none,2,10000,40000,18782457,469,-79
+add-yield-none,4,10000,80000,19359930,241,301
+add-yield-none,8,10000,160000,20416100,127,87
+add-yield-none,12,10000,240000,24752942,103,138
+
+add-yield-none,2,100000,400000,184221752,460,-5317
+add-yield-none,4,100000,800000,190289307,237,-2224
+add-yield-none,8,100000,1600000,200066427,125,-7438
+add-yield-none,12,100000,2400000,255871683,106,-16739
 
 Why are the --yield runs so much slower?
--
+-The runs with the --yield option specified are much slower simply because of the overhead that is associated with context switching for threads. Without the --yield option, there only is guarenteed to be a minimum number of context switches equal to the number of threads, whereas the guarenteed minimum number of context switches when the --yield option is specified is 2*numThreads*numIterations + numThreads (required context switch in every add() call, and add() is called twice for every iteration, as well as one more to context switch after the thread finishes execution).
 
 Where is the additional time going?
--
+-Like mentioned in the previous answer, the additional time is going to the overhead associated with the extra required context switches for the threads. This overhead includes interrupting the thread, saving the state of the thread (pushing registers, saving the thread-specific stack, etc.), cleaning-up the CPU to prepare for the next thread, and then loading in the new thread.
 
 Is it possible to get valid per-operation timings if we are using the --yield option? If so, explain how. If not, explain why not.
--
+-No, it is not possible to get valid per-operation timings if we are using the --yield option, as the time it takes to context switch (and the actual number of times that we context switch) cannot be determined, as this depends on the system itself. To be more specific, it depends on the time it takes for the dispatcher to perform the context switch between threads.
+
+
+QUESTION 2.1.3 - measurement errors:
+Results:
+With increasing number of iterations, the results depict a decrease in the average cost per operation.
+
+Why does the average cost per operation drop with increasing iterations?
+-As the time it takes for a thread to complete its execution (based on the number of iterations specified for it to run) increases, the time and overhead it takes for the main process to create all the threads becomes more and more insignificant. The fixed amount of time for all of these thread creations is spread out over more and more operations (which is proportional to the number of iterations), therefore the average cost per operation is inversely proportional to the number of iterations.
+
+If the cost per iteration is a function of the number of iterations, how do we know how many iterations to run (or what the "correct" cost is)?
+-The "correct" cost can be estimated/"determined" by increasing the number of iterations by more and more. As the number of iterations approaches infinity, this constant fixed overhead cost for thread creation becomes so insignificant it can be seen as essentially 0 (non-contributing to the total cost).
+
+
+QUESTION 2.1.4 - costs of serialization:
+Results:
+For synchronization runs, every single test is done without failure (as expected). Additionally, the number of threads increase, the cost of every operation increases for tests with synchronization enabled.
+
+Why do all of the options perform similarly for low numbers of threads?
+-Since there are not that many threads, the overhead cost associated with each of these options are not too apparent, as they are not performed as often. Essentially, the overall overhead cost with creating the threads (can almost be deemed "mandatory" cost) masks the overhead associated with each option until they become big enough (with adding more threads) to distinguish themselves in their per-operation-costs.
+
+Why do the three protected operations slow down as the number of threads rises?
+-As the number of threads rise, the more overhead there is associated with properly handling a thread's access to the shared data. As more threads attempt to access the same data, if it is locked, then they must wait for the data to be unlocked, thereby leading to time wasted with no work/execution being done in the process (thereby increasing the amount of per-operation-cost).
