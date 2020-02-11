@@ -7,37 +7,62 @@
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <time.h>
+#include <errno.h>
+#include <pthread.h>
+#include <sched.h>
+#include <signal.h>
 
 void parseOptions(int argc, char** argv);
 void sighandler();
 void createThreads(long numOfThreads);
 void joinThreads(long numOfThreads);
-void* thread_manage_elements();
+void* thread_manage_elements(void* thread_id);
+void getRandKey(char* buf);
 void logResults(struct timespec* start, struct timespec* end);
+void createElements();
+void freeElements();
+void getTag(char* buf);
 
 #define KEYSIZE 11 //1 extra for null byte
+#define TAG_MAXSIZE 15
+#define SYNC_NONE 0
+#define SYNC_MUTEX 1
+#define SYNC_SPINLOCK 2
 
 struct option long_options[] =
 {
 	{"threads", required_argument, 0, 't'},
 	{"iterations", required_argument, 0, 'i'},
 	{"yield", required_argument, 0, 'y'},
-	//{"sync", required_argument, 0, 's'},
+	{"sync", required_argument, 0, 's'},
 	{0, 0, 0, 0} //last element of long_options array must contain all 0's (end)
 };
 
 //Globals
 long long numThreads = 1; //default 1
 long long numIterations = 1; //default 1
-SortedList_t head;
-char yieldopts[5] = "-";
-int opt_yield = 0;
-SortedListElement_t** elements; //array of ptrs to list elements
 long long numElements;
+int lockType = SYNC_NONE;
+
+int opt_yield = 0;
+char yieldopts[5] = "-";
+
+SortedList_t head;
+SortedListElement_t** elements; //array of ptrs to list elements
+
+pthread_t* tid = NULL;
+long long* thread_instance = NULL;
+pthread_mutex_t mutexlock;
+int spinlock = 0;
 
 int main(int argc, char* argv[])
 {
 	parseOptions(argc,argv);
+
+	//setup necessary structures
+	if (lockType == SYNC_MUTEX)
+		pthread_mutex_init(&mutexlock,NULL);
 
 	createElements();
 
@@ -67,7 +92,11 @@ int main(int argc, char* argv[])
 		exit(1);
 	}
 
-	//***********************************//
+	if (signal(SIGSEGV,sighandler) == SIG_ERR)
+	{
+		fprintf(stderr,"Error while attempting to set signal handler for signal: %d", SIGSEGV);
+		exit(1);
+	}
 
 	//create threads
 	createThreads(numThreads);
@@ -96,34 +125,17 @@ int main(int argc, char* argv[])
 		exit(1);
 	}
 
+	int length = SortedList_length(&head);
+	if (length != 0)
+	{
+		fprintf(stderr, "Error in main thread: Length of list is not 0 as expected. Length is: %d\n", length);
+		exit(2);
+	}
+
 	//print to stdout CSV record
 	logResults(&starttime,&endtime);
 
 	exit(0);
-
-	//create threads
-		//assign them a set of elements to work on (based on iterations)
-		//inserts all into shared list
-		//gets list length
-		//looks up and deletes each keys it had previously inserted
-		//exits to rejoin main
-
-	//join threads
-
-	//note end time
-
-	//check length of list to confirm its 0
-
-	//logRecords()
-		//name of test
-		//numThreads
-		//numIterations
-		//numLists (1 always in this project)
-		//total operations peformed (numThreads*numIterations*3)
-		//total runtime for all threads (ns)
-		//average time per operation (ns)
-
-	//exit(0)
 }
 
 void parseOptions(int argc, char** argv)
@@ -150,7 +162,7 @@ void parseOptions(int argc, char** argv)
 		{
 			default:
 			case '?':
-				fprintf(stderr, "Specified option '%s' not recognized.\nusage: %s [--threads=#] [--iterations=#] [--yield=[idl]] [--sync=type]\n\t--threads: indicate number of parallel threads to run\n\t--iterations: indicate number of iterations for parallel thread(s) to run\n\t--yield: forces yields at critical sections for lookups (l), deletes (d), or inserts (i)\n\t--sync: Specifies type of synchronization method to use ('m' for mutex, 's' for spin-lock, 'c' for compare-and-swap)\n\n", argv[optind-1], argv[0]);
+				fprintf(stderr, "Specified option '%s' not recognized.\nusage: %s [--threads=#] [--iterations=#] [--yield=[idl]] [--sync=type]\n\t--threads: indicate number of parallel threads to run\n\t--iterations: indicate number of iterations for parallel thread(s) to run\n\t--yield: forces yields at critical sections for lookups (l), deletes (d), or inserts (i)\n\t--sync: Specifies type of synchronization method to use ('m' for mutex, 's' for spin-lock)\n\n", argv[optind-1], argv[0]);
 				exit(1);
 			case 't':
 				raw_threads = optarg;
@@ -160,11 +172,22 @@ void parseOptions(int argc, char** argv)
 				raw_iterations = optarg;
 				numIterations = (int) strtol(raw_iterations,NULL,10);
 				break;
+			case 's':
+				if (strlen(optarg) != 1 || (optarg[0] != 's' && optarg[0] != 'm'))
+				{
+					fprintf(stderr, "Specified option argument '%s' not recognized.\nusage: %s [--threads=#] [--iterations=#] [--yield=[idl]] [--sync=type]\n\t--threads: indicate number of parallel threads to run\n\t--iterations: indicate number of iterations for parallel thread(s) to run\n\t--yield: forces yields at critical sections for lookups (l), deletes (d), or inserts (i)\n\t--sync: Specifies type of synchronization method to use ('m' for mutex, 's' for spin-lock)\n\n", optarg, argv[0]);
+					exit(1);
+				}
+				else if (optarg[0] == 'm')
+					lockType = SYNC_MUTEX;
+				else if (optarg[0] == 's')
+					lockType = SYNC_SPINLOCK;
+				break;
 			case 'y':
 				len = strlen(optarg);
 				if (len > 3)
 				{
-					fprintf(stderr, "Specified option argument '%s' not recognized (or is too many characters).\nusage: %s [--threads=#] [--iterations=#] [--yield=[idl]] [--sync=type]\n\t--threads: indicate number of parallel threads to run\n\t--iterations: indicate number of iterations for parallel thread(s) to run\n\t--yield: forces yields at critical sections for lookups (l), deletes (d), or inserts (i)\n\t--sync: Specifies type of synchronization method to use ('m' for mutex, 's' for spin-lock, 'c' for compare-and-swap)\n\n", optarg, argv[0]);
+					fprintf(stderr, "Specified option argument '%s' not recognized (or is too many characters).\nusage: %s [--threads=#] [--iterations=#] [--yield=[idl]] [--sync=type]\n\t--threads: indicate number of parallel threads to run\n\t--iterations: indicate number of iterations for parallel thread(s) to run\n\t--yield: forces yields at critical sections for lookups (l), deletes (d), or inserts (i)\n\t--sync: Specifies type of synchronization method to use ('m' for mutex, 's' for spin-lock)\n\n", optarg, argv[0]);
 					exit(1);
 				}
 				for (int i = 0; i < len; i++)
@@ -184,7 +207,7 @@ void parseOptions(int argc, char** argv)
 							strcat(yieldopts,"l");
 							break;
 						default:
-							fprintf(stderr, "Specified option argument '%s' not recognized.\nusage: %s [--threads=#] [--iterations=#] [--yield=[idl]] [--sync=type]\n\t--threads: indicate number of parallel threads to run\n\t--iterations: indicate number of iterations for parallel thread(s) to run\n\t--yield: forces yields at critical sections for lookups (l), deletes (d), or inserts (i)\n\t--sync: Specifies type of synchronization method to use ('m' for mutex, 's' for spin-lock, 'c' for compare-and-swap)\n\n", optarg, argv[0]);
+							fprintf(stderr, "Specified option argument '%s' not recognized.\nusage: %s [--threads=#] [--iterations=#] [--yield=[idl]] [--sync=type]\n\t--threads: indicate number of parallel threads to run\n\t--iterations: indicate number of iterations for parallel thread(s) to run\n\t--yield: forces yields at critical sections for lookups (l), deletes (d), or inserts (i)\n\t--sync: Specifies type of synchronization method to use ('m' for mutex, 's' for spin-lock)\n\n", optarg, argv[0]);
 							exit(1);
 					}
 				}
@@ -226,14 +249,14 @@ void parseOptions(int argc, char** argv)
 
 void sighandler()
 {
-	fprintf(stderr,"Received and caught segmentation fault.\n");
+	fprintf(stderr,"Received and caught SIGSEGV signal (segmentation fault).\n");
 	exit(2);
 }
 
 void createElements()
 {
 	numElements = numThreads*numIterations;
-	elements = calloc(numElements*sizeof(SortedListElement_t*));
+	elements = calloc(numElements,sizeof(SortedListElement_t*));
 	
 	if (elements == NULL)
 		exit(2);
@@ -246,7 +269,7 @@ void createElements()
 		if (elements[i] == NULL)
 			exit(2);
 
-		char* key = (char *) malloc((KEYSIZE)*sizeof(char))
+		char* key = (char *) malloc((KEYSIZE)*sizeof(char));
 		if (key == NULL)
 			exit(2);
 
@@ -263,13 +286,19 @@ void freeElements()
 		if (elements[i] != NULL)
 		{
 			if (elements[i]->key != NULL)
-				free(elements[i]->key);
+				free((char *) elements[i]->key);
 
 			free(elements[i]);
 		}
 	}
 
 	free(elements);
+
+	if (tid != NULL)
+		free(tid);
+
+	if (thread_instance != NULL)
+		free(thread_instance);
 }
 
 void getRandKey(char* buf)
@@ -279,28 +308,279 @@ void getRandKey(char* buf)
 	int range = strlen(charset);
 
 	for (int i = 0; i < KEYSIZE-1; i++)
-		buf[i] = dict[rand() % range];
+		buf[i] = charset[rand() % range];
 
 	buf[KEYSIZE-1] = '\0';
 }
 
 void createThreads(long numOfThreads)
 {
-	//TODO
+	//create threads
+	tid = malloc(numOfThreads*sizeof(pthread_t));
+
+	if (tid == NULL)
+	{
+		fprintf(stderr, "Error with memory allocation for thread IDs\n");
+		exit(2);
+	}
+
+	thread_instance = (long long*) malloc(numOfThreads*sizeof(long long));
+	if (thread_instance == NULL)
+	{
+		fprintf(stderr, "Error with memory allocation for thread IDs\n");
+		exit(2);
+	}
+
+	for (int i = 0; i < numOfThreads; i++)
+	{
+		thread_instance[i] = (long long) i+1;
+		int retval = pthread_create(&tid[i],NULL,thread_manage_elements,(void *) &thread_instance[i]);
+		if (retval != 0)
+		{
+			fprintf(stderr, "Error with creating thread %d: ", i+1);
+			switch (retval)
+			{
+				case EAGAIN:
+					fprintf(stderr,"System lacked necessary resources to create another thread, or the system-imposed limit on the total number of threads in a process would be exceeded.\n");
+					break;
+				case EPERM:
+					fprintf(stderr,"Caller does not have appropiate permission to set the required scheduling parameters or scheduling policy.\n");
+					break;
+				default:
+					fprintf(stderr,"Failed with an unrecognized error.\n");
+					break;
+			}
+			
+			exit(1);
+		}
+	}
 }
 
 void joinThreads(long numOfThreads)
 {
-	//TODO
+	for (int i = 0; i < numOfThreads; i++)
+	{
+		int retval = pthread_join(tid[i], NULL);
+		if (retval != 0)
+		{
+			fprintf(stderr, "Error with joining thread %d: \n", i+1);
+			switch (retval)
+			{
+				case EDEADLK:
+					fprintf(stderr, "A deadlock was detected or indicated thread specifies the calling thread.\n");
+					break;
+				case EINVAL:
+					fprintf(stderr, "The implementation has detected that the indicated thread does not refer to a joinable thread.\n");
+					break;
+				default:
+					fprintf(stderr, "Failed with an unrecognized error.\n");
+			}
+
+			exit(1);
+		}
+	}
 }
 
-void* thread_manage_elements()
+void* thread_manage_elements(void* thread_id)
 {
-	//TODO
+	long long* thread_num = (long long*) thread_id;
+
+	long long set_begin = (*thread_num - 1)*numIterations;
+	long long set_end = set_begin + numIterations - 1;
+
+	for (long long i = set_begin; i <= set_end; i++)
+	{
+		switch (lockType)
+		{
+			default:
+			case SYNC_NONE:
+				SortedList_insert(&head,elements[i]);
+				break;
+			case SYNC_MUTEX:
+				if (pthread_mutex_lock(&mutexlock) != 0)
+				{
+					fprintf(stderr,"Error while attempting to lock mutex.\n");
+					exit(1);
+				}
+				SortedList_insert(&head,elements[i]);
+				if (pthread_mutex_unlock(&mutexlock) != 0)
+				{
+					fprintf(stderr,"Error while attempting to unlock mutex.\n");
+					exit(1);
+				}
+
+				break;
+			case SYNC_SPINLOCK:
+
+				//wait until spinlock is 0 (unlocked) before moving on
+				while (__sync_lock_test_and_set(&spinlock,1));
+				
+				SortedList_insert(&head,elements[i]);
+
+				__sync_lock_release(&spinlock);
+				break;
+		}
+	}
+
+	switch (lockType)
+	{
+		default:
+		case SYNC_NONE:
+			if (SortedList_length(&head) == -1)
+			{
+				fprintf(stderr, "Unexpected error: List found to be corrupted upon requesting its length.\n");
+				exit(2);
+			}
+			break;
+		case SYNC_MUTEX:
+			if (pthread_mutex_lock(&mutexlock) != 0)
+			{
+				fprintf(stderr,"Error while attempting to lock mutex.\n");
+				exit(1);
+			}
+
+			if (SortedList_length(&head) == -1)
+			{
+				fprintf(stderr, "Unexpected error: List found to be corrupted upon requesting its length.\n");
+				exit(2);
+			}
+
+			if (pthread_mutex_unlock(&mutexlock) != 0)
+			{
+				fprintf(stderr,"Error while attempting to unlock mutex.\n");
+				exit(1);
+			}
+
+			break;
+		case SYNC_SPINLOCK:
+
+			//wait until spinlock is 0 (unlocked) before moving on
+			while (__sync_lock_test_and_set(&spinlock,1));
+			
+			if (SortedList_length(&head) == -1)
+			{
+				fprintf(stderr, "Unexpected error: List found to be corrupted upon requesting its length.\n");
+				exit(2);
+			}
+
+			__sync_lock_release(&spinlock);
+			break;
+	}
+
+	SortedListElement_t* toDelete;
+
+	for (long long i = set_begin; i <= set_end; i++)
+	{
+		switch (lockType)
+		{
+			default:
+			case SYNC_NONE:
+				toDelete = SortedList_lookup(&head,elements[i]->key);
+
+				if (toDelete == NULL)
+				{
+					fprintf(stderr, "Unexpected error: Lookup of previously added element to list has failed (non-existant).\n");
+					exit(2);
+				}
+
+				if (SortedList_delete(toDelete) == 1)
+				{
+					fprintf(stderr, "Unexpected error: Corrupted list found when attempting to delete element.\n");
+					exit(2);
+				}
+
+				break;
+			case SYNC_MUTEX:
+				if (pthread_mutex_lock(&mutexlock) != 0)
+				{
+					fprintf(stderr,"Error while attempting to lock mutex.\n");
+					exit(1);
+				}
+
+				toDelete = SortedList_lookup(&head,elements[i]->key);
+
+				if (toDelete == NULL)
+				{
+					fprintf(stderr, "Unexpected error: Lookup of previously added element to list has failed (non-existant).\n");
+					exit(2);
+				}
+
+				if (SortedList_delete(toDelete) == 1)
+				{
+					fprintf(stderr, "Unexpected error: Corrupted list found when attempting to delete element.\n");
+					exit(2);
+				}
+
+				if (pthread_mutex_unlock(&mutexlock) != 0)
+				{
+					fprintf(stderr,"Error while attempting to unlock mutex.\n");
+					exit(1);
+				}
+
+				break;
+			case SYNC_SPINLOCK:
+
+				//wait until spinlock is 0 (unlocked) before moving on
+				while (__sync_lock_test_and_set(&spinlock,1));
+				
+				toDelete = SortedList_lookup(&head,elements[i]->key);
+
+				if (toDelete == NULL)
+				{
+					fprintf(stderr, "Unexpected error: Lookup of previously added element to list has failed (non-existant).\n");
+					exit(2);
+				}
+
+				if (SortedList_delete(toDelete) == 1)
+				{
+					fprintf(stderr, "Unexpected error: Corrupted list found when attempting to delete element.\n");
+					exit(2);
+				}
+
+				__sync_lock_release(&spinlock);
+				break;
+		}
+	}
+
 	return NULL;
 }
 
 void logResults(struct timespec* start, struct timespec* end)
 {
-	//TODO
+	char tag[TAG_MAXSIZE];
+	getTag(tag);
+	
+	long numOperations = numThreads*numIterations*3;
+
+	int numLists = 1;
+
+	time_t dsec = end->tv_sec - start->tv_sec;
+	long dnsec = end->tv_nsec - start->tv_nsec;
+	long runTime = dsec*1000000000 + dnsec;
+
+	long avgTimePerOperation = runTime / numOperations;
+
+	fprintf(stdout,"%s,%lld,%lld,%d,%ld,%ld,%ld\n",tag,numThreads,numIterations,numLists,numOperations,runTime,avgTimePerOperation);
+}
+
+void getTag(char* buf)
+{
+	strcpy(buf,"list-");
+	
+	if (opt_yield != 0)
+	{
+		if (opt_yield & INSERT_YIELD)
+			strcat(buf,"i");
+		if (opt_yield & DELETE_YIELD)
+			strcat(buf,"d");
+		if (opt_yield & LOOKUP_YIELD)
+			strcat(buf,"l");
+
+		strcat(buf,"-");
+	}
+	else
+		strcat(buf,"none-");
+
+	//add sync ops to buf
+	strcat(buf,"none");
 }

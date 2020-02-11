@@ -151,7 +151,7 @@ void* thread_add_and_subtract()
 		case SYNC_MUTEX:
 			for (int i = 0; i < numIterations; i++)
 			{
-				if (pthread_mutex_lock(&mutexlock) != 0)\
+				if (pthread_mutex_lock(&mutexlock) != 0)
 				{
 					fprintf(stderr,"Error while attempting to lock mutex.\n");
 					exit(1);
@@ -165,7 +165,7 @@ void* thread_add_and_subtract()
 			}
 			for (int i = 0; i < numIterations; i++)
 			{
-				if (pthread_mutex_lock(&mutexlock) != 0)\
+				if (pthread_mutex_lock(&mutexlock) != 0)
 				{
 					fprintf(stderr,"Error while attempting to lock mutex.\n");
 					exit(1);
