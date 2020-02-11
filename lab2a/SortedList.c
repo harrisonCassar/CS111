@@ -4,6 +4,7 @@
 
 #include "SortedList.h"
 #include <string.h>
+#include <sched.h>
 
 /**
  * SortedList_insert ... insert an element into a sorted list
@@ -42,6 +43,8 @@ void SortedList_insert(SortedList_t *list, SortedListElement_t *element)
 		//check if fits right before there
 		if (strcmp(curr->key, element->key) > 0)
 		{
+			if (opt_yield & INSERT_YIELD)
+				sched_yield();
 			past->next = element;
 			curr->prev = element;
 			element->prev = past;
@@ -92,6 +95,10 @@ int SortedList_delete( SortedListElement_t *element)
 		return 1;
 
 	element->prev->next = element->next;
+
+	if (opt_yield & DELETE_YIELD)
+		sched_yield();
+
 	element->next->prev = element->prev;
 
 	return 0;
@@ -122,6 +129,9 @@ SortedListElement_t *SortedList_lookup(SortedList_t *list, const char *key)
 
 	for (;;)
 	{
+		if (opt_yield & LOOKUP_YIELD)
+			sched_yield();
+		
 		//check for invalid element in list
 		if (curr == NULL)
 			return NULL;
@@ -163,6 +173,9 @@ int SortedList_length(SortedList_t *list)
 
 	for (;;)
 	{
+		if (opt_yield & LOOKUP_YIELD)
+			sched_yield();
+		
 		//check for corruption
 		if (curr == NULL)
 			return -1;

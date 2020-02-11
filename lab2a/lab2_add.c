@@ -106,6 +106,8 @@ int main(int argc, char* argv[])
 
 	//print to stdout CSV record
 	logResults(&starttime,&endtime);
+
+	exit(0);
 }
 
 void add(long long *pointer, long long value)
@@ -149,15 +151,31 @@ void* thread_add_and_subtract()
 		case SYNC_MUTEX:
 			for (int i = 0; i < numIterations; i++)
 			{
-				pthread_mutex_lock(&mutexlock);
+				if (pthread_mutex_lock(&mutexlock) != 0)\
+				{
+					fprintf(stderr,"Error while attempting to lock mutex.\n");
+					exit(1);
+				}
 				add(&counter,1);
-				pthread_mutex_unlock(&mutexlock);
+				if (pthread_mutex_unlock(&mutexlock) != 0)
+				{
+					fprintf(stderr,"Error while attempting to unlock mutex.\n");
+					exit(1);
+				}
 			}
 			for (int i = 0; i < numIterations; i++)
 			{
-				pthread_mutex_lock(&mutexlock);
+				if (pthread_mutex_lock(&mutexlock) != 0)\
+				{
+					fprintf(stderr,"Error while attempting to lock mutex.\n");
+					exit(1);
+				}
 				add(&counter,-1);
-				pthread_mutex_unlock(&mutexlock);
+				if (pthread_mutex_unlock(&mutexlock) != 0)
+				{
+					fprintf(stderr,"Error while attempting to unlock mutex.\n");
+					exit(1);
+				}
 			}
 			break;
 		case SYNC_SPINLOCK:
@@ -307,7 +325,7 @@ void createThreads(long numOfThreads)
 					break;
 			}
 			
-			exit(2);
+			exit(1);
 		}
 	}
 }
@@ -332,7 +350,7 @@ void joinThreads(long numOfThreads)
 					fprintf(stderr, "Failed with an unrecognized error.\n");
 			}
 
-			exit(2);
+			exit(1);
 		}
 	}
 }

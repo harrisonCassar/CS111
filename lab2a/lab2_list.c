@@ -10,6 +10,12 @@
 
 void parseOptions(int argc, char** argv);
 void sighandler();
+void createThreads(long numOfThreads);
+void joinThreads(long numOfThreads);
+void* thread_manage_elements();
+void logResults(struct timespec* start, struct timespec* end);
+
+#define KEYSIZE 11 //1 extra for null byte
 
 struct option long_options[] =
 {
@@ -39,6 +45,85 @@ int main(int argc, char* argv[])
 	head.next = &head;
 	head.prev = &head;
 	head.key = NULL;
+
+	//note start time
+	struct timespec starttime;
+	if (clock_gettime(CLOCK_MONOTONIC,&starttime) == -1)
+	{
+		fprintf(stderr,"Error: %s; ", strerror(errno));
+        switch (errno)
+        {
+        	case EFAULT:
+        		fprintf(stderr,"Attempted recording of start time failed because timespec struct ptr points outside the accessible address space.\n");
+        		break;
+        	case EINVAL:
+        		fprintf(stderr,"Attempted recording of start time failed because specified 'CLOCK_MONOTONIC' is not supported on this system.\n");
+            	break;
+            default:
+            	fprintf(stderr,"Attempted recording of start time failed with an unrecognized error.\n");
+            	break;
+        }
+		
+		exit(1);
+	}
+
+	//***********************************//
+
+	//create threads
+	createThreads(numThreads);
+	
+	//join/wait for all threads to finish
+	joinThreads(numThreads);
+
+	//note end time
+	struct timespec endtime;
+	if (clock_gettime(CLOCK_MONOTONIC,&endtime) == -1)
+	{
+		fprintf(stderr,"Error: %s; ", strerror(errno));
+        switch (errno)
+        {
+        	case EFAULT:
+        		fprintf(stderr,"Attempted recording of end time failed because timespec struct ptr points outside the accessible address space.\n");
+        		break;
+        	case EINVAL:
+        		fprintf(stderr,"Attempted recording of end time failed because specified 'CLOCK_MONOTONIC' is not supported on this system.\n");
+            	break;
+            default:
+            	fprintf(stderr,"Attempted recording of end time failed with an unrecognized error.\n");
+            	break;
+        }
+		
+		exit(1);
+	}
+
+	//print to stdout CSV record
+	logResults(&starttime,&endtime);
+
+	exit(0);
+
+	//create threads
+		//assign them a set of elements to work on (based on iterations)
+		//inserts all into shared list
+		//gets list length
+		//looks up and deletes each keys it had previously inserted
+		//exits to rejoin main
+
+	//join threads
+
+	//note end time
+
+	//check length of list to confirm its 0
+
+	//logRecords()
+		//name of test
+		//numThreads
+		//numIterations
+		//numLists (1 always in this project)
+		//total operations peformed (numThreads*numIterations*3)
+		//total runtime for all threads (ns)
+		//average time per operation (ns)
+
+	//exit(0)
 }
 
 void parseOptions(int argc, char** argv)
@@ -141,7 +226,7 @@ void parseOptions(int argc, char** argv)
 
 void sighandler()
 {
-	fprintf(stderr,"Received and caught segmentation fault\n");
+	fprintf(stderr,"Received and caught segmentation fault.\n");
 	exit(2);
 }
 
@@ -161,7 +246,13 @@ void createElements()
 		if (elements[i] == NULL)
 			exit(2);
 
-		//strcpy(elements[i]->key ==
+		char* key = (char *) malloc((KEYSIZE)*sizeof(char))
+		if (key == NULL)
+			exit(2);
+
+		getRandKey(key);
+
+		elements[i]->key = key;
 	}
 }
 
@@ -170,8 +261,46 @@ void freeElements()
 	for (int i = 0; i < numElements; i++)
 	{
 		if (elements[i] != NULL)
+		{
+			if (elements[i]->key != NULL)
+				free(elements[i]->key);
+
 			free(elements[i]);
+		}
 	}
 
 	free(elements);
+}
+
+void getRandKey(char* buf)
+{
+	static char charset[] = "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ";
+
+	int range = strlen(charset);
+
+	for (int i = 0; i < KEYSIZE-1; i++)
+		buf[i] = dict[rand() % range];
+
+	buf[KEYSIZE-1] = '\0';
+}
+
+void createThreads(long numOfThreads)
+{
+	//TODO
+}
+
+void joinThreads(long numOfThreads)
+{
+	//TODO
+}
+
+void* thread_manage_elements()
+{
+	//TODO
+	return NULL;
+}
+
+void logResults(struct timespec* start, struct timespec* end)
+{
+	//TODO
 }

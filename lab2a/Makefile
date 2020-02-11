@@ -17,6 +17,9 @@ build: lab2_add.c lab2_list.c SortedList.c
 	#$(CC) $(CFLAGS) $(CLIBRARIES) -o lab2_add lab2_add.c
 	$(CC) $(CFLAGS) $(CLIBRARIES) -o lab2_list SortedList.c lab2_list.c 
 
+build-add: lab2_add.c
+	$(CC) $(CFLAGS) $(CLIBRARIES) -o lab2_add lab2_add.c
+
 tests:
 	-rm -f lab2_add.csv lab2_list.csv
 
