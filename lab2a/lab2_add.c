@@ -132,7 +132,7 @@ void cas_add(long long *pointer, long long value)
 			sched_yield();
 
 		//check if value still the same, and swap in newval if so (otherwise, repeat access & sum)
-		if (__sync_bool_compare_and_swap(pointer,oldval,newval))
+		if (__sync_val_compare_and_swap(pointer,oldval,newval) == oldval)
 			break;
 	}
 }

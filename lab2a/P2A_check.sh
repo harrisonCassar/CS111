@@ -46,6 +46,8 @@ else
 	student=$1
 fi
 
+echo $errors
+
 # make sure the tarball has the right name
 tarball="$LAB-$student.tar.gz"
 if [ ! -s $tarball ]
@@ -86,17 +88,25 @@ echo "... checking for README file"
 checkFiles $README
 let errors+=$?
 
+echo $errors
+
 echo "... checking for submitter ID in $README"
 ID=`getIDs $README $student`
 let errors+=$?
+
+echo $errors
 
 echo "... checking for submitter email in $README"
 EMAIL=`getEmail $README`
 let errors+=$?
 
+echo $errors
+
 echo "... checking for submitter name in $README"
 NAME=`getName $README`
 let errors+=$?
+
+echo $errors
 
 echo "... checking slip-day use in $README"
 SLIPDAYS=0
@@ -122,9 +132,13 @@ else
 	echo "    no SLIPDAYS: entry"
 fi
 
+echo $errors
+
 echo "... checking for other expected files"
 checkFiles $MAKEFILE $EXPECTED
 let errors+=$?
+
+echo $errors
 
 # make sure we find files with all the expected suffixes
 if [ -n "$SUFFIXES" ]; then
@@ -133,29 +147,52 @@ if [ -n "$SUFFIXES" ]; then
 	let errors+=$?
 fi
 
+echo $errors
+
 echo "... checking for required Make targets"
 checkTarget clean
 let errors+=$?
+
+echo $errors
+
 checkTarget tests
 let errors+=$?
+
+echo $errors
+
 checkTarget graphs
 let errors+=$?
+
+echo $errors
+
 checkTarget dist
 let errors+=$?
+
+echo $errors
 
 echo "... checking for required compillation options"
 checkMakefile Wall
 let errors+=$?
+
+echo $errors
+
 checkMakefile Wextra
 let errors+=$?
+
+echo $errors
 
 # make sure we can build the expected program
 echo "... building default target(s)"
 make 2> STDERR
 testRC $? 0
 let errors+=$?
+
+echo $errors
+
 noOutput STDERR
 let errors+=$?
+
+echo $errors
 
 echo "... deleting all data and graphs to force rebuild"
 rm -f $PGMS $DATA $GRAPHS
@@ -165,19 +202,28 @@ make dist 2> STDERR
 testRC $? 0
 let errors+=$?
 
+echo $errors
+
 checkFiles $TARBALL
 if [ $? -ne 0 ]; then
 	echo "ERROR: make dist did not produce $tarball"
 	let errors+=1
 fi
 
+echo $errors
+
 echo " ... checking make clean"
 rm -f STDERR
 make clean
 testRC $? 0
 let errors+=$?
+
+echo $errors
+
 dirCheck $TEMP $$
 let errors+=$?
+
+echo $errors
 
 #
 # now redo the default make and start testing functionality
@@ -186,12 +232,19 @@ echo "... redo default make"
 make 2> STDERR
 testRC $? 0
 let errors+=$?
+
+echo $errors
+
 noOutput STDERR
 let errors+=$?
+
+echo $errors
 
 echo "... checking for expected products"
 checkPrograms $PGMS
 let errors+=$?
+
+echo $errors
 
 # see if they detect and report invalid arguments
 for p in $PGMS
@@ -208,6 +261,8 @@ do
 		cat STDERR
 	fi
 done
+
+echo $errors
 
 
 # sanity test on basic output
@@ -260,6 +315,8 @@ do
 	fieldValue "$record" "sum" 7 0
 	let errors+=$?
 done
+
+echo $errors
 
 # sanity test on basic output
 #	--threads=
@@ -314,6 +371,8 @@ do
 	let errors+=$?
 done
 
+echo $errors
+
 echo "... usage of expected library functions"
 for r in sched_yield pthread_mutex_lock pthread_mutex_unlock __sync_val_compare_and_swap __sync_lock_test_and_set __sync_lock_release
 do
@@ -326,6 +385,8 @@ do
 		echo "    ... $r ... OK"
 	fi
 done
+
+echo $errors
 
 echo
 if [ $SLIPDAYS -eq 0 ]
@@ -349,5 +410,7 @@ do
 done
 echo
 
-# delete temp files, report errors, and exit
+echo $errors
+
+# dele temp files, report errors, and exit
 cleanup $$ $errors
