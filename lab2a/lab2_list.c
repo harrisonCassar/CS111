@@ -582,5 +582,17 @@ void getTag(char* buf)
 		strcat(buf,"none-");
 
 	//add sync ops to buf
-	strcat(buf,"none");
+	switch (lockType)
+	{
+		default:
+		case SYNC_NONE:
+			strcat(buf,"none");
+			break;
+		case SYNC_MUTEX:
+			strcat(buf,"m");
+			break;
+		case SYNC_SPINLOCK:
+			strcat(buf,"s");
+			break;
+	}
 }

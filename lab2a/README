@@ -95,3 +95,15 @@ Why do all of the options perform similarly for low numbers of threads?
 
 Why do the three protected operations slow down as the number of threads rises?
 -As the number of threads rise, the more overhead there is associated with properly handling a thread's access to the shared data. As more threads attempt to access the same data, if it is locked, then they must wait for the data to be unlocked, thereby leading to time wasted with no work/execution being done in the process (thereby increasing the amount of per-operation-cost).
+
+
+QUESTION 2.2.1 - scalability of Mutex
+Compare the variation in time per mutex-protected operation vs the number of threads in Part-1 (adds) and Part-2 (sorted lists).
+Comment on the general shapes of the curves, and explain why they have this shape.
+Comment on the relative rates of increase and differences in the shapes of the curves, and offer an explanation for these differences.
+
+
+QUESTION 2.2.2 - scalability of spin locks
+
+Compare the variation in time per protected operation vs the number of threads for list operations protected by Mutex vs Spin locks. Comment on the general shapes of the curves, and explain why they have this shape.
+Comment on the relative rates of increase and differences in the shapes of the curves, and offer an explanation for these differences.
