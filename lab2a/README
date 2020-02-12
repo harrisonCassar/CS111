@@ -3,8 +3,29 @@ EMAIL: Harrison.Cassar@gmail.com
 ID: 505114980
 
 Included Files:
--
--Makefile: Makefile with target dist (builds distribution tarball)
+-lab2_add.c: a C program that implements and tests a shared variable add function, implements various yield/synchronization command-line options, and produces output statistics for the executions.
+-SortedList.h: header file describing the interfaces for a doubly linked list's operations
+-SortedList.c: a C module that implements insert, delete, lookup, and length methods for a sorted doubly linked list (described in the SortedList.h header file, including correct placement of yield calls).
+-lab2_list.c: a C program that implements and tests operations done on a shared linked list, implements various yield/synchronization command-line options, and produces output statistics for the executions.
+-Makefile: Makefile to build the deliverable programs (lab2_add and lab2_list), output, graphs, and tarball. Targets:
+	-build: (default target) compile all programs
+	-tests: run all (over 200) specified test cases to generate results in CSV files
+	-graphs: uses gnuplot(1) and the included data reduction scripts lab2_add.gp and lab2_list.gp to generate the required graphs
+-lab2_add.csv: contains all the statistical output for the Part-1 tests
+-lab2_list.csv: contains all the statistical output for the Part-2 tests
+-lab2_add graphs: created by running the graphs target in the Makefile
+	-lab2_add-1.png: threads and iterations required to generate a failure (with and without yields)
+	-lab2_add-2.png: average time per operation with and without yields.
+	-lab2_add-3.png: average time per (single threaded) operation vs. the number of iterations.
+	-lab2_add-4.png: threads and iterations that can run successfully with yields under each of the synchronization options.
+	-lab2_add-5.png: average time per (protected) operation vs. the number of threads.
+-lab2_list graphs: created by running the graphs target in the Makefile
+	-lab2_list-1.png: average time per (single threaded) unprotected operation vs. number of iterations (illustrating the correction of the per-operation cost for the list length).
+	-lab2_list-2.png: threads and iterations required to generate a failure (with and without yields).
+	-lab2_list-3.png: iterations that can run (protected) without failure.
+	-lab2_list-4.png: (length-adjusted) cost per operation vs the number of threads for the various synchronization options.
+-lab2_add.gp: provided data reduction script that generates the required graphs
+-lab2_list.gp: provided data reduction script that generates the required graphs
 
 Resources:
 -provided pthreads tutorial: https://computing.llnl.gov/tutorials/pthreads/
@@ -102,8 +123,12 @@ Compare the variation in time per mutex-protected operation vs the number of thr
 Comment on the general shapes of the curves, and explain why they have this shape.
 Comment on the relative rates of increase and differences in the shapes of the curves, and offer an explanation for these differences.
 
+The variation in time per mutex-protected operation against the number of threads in both Part 1 and Part 2 increase in an approximately linear fashion. For Part 1 (the addition case), the curve begins off increasing at a high rate, but over time begins to plateau off (a lower rate of change with more threads). This is likely resulting because of the relatively small size of the add's critical section, meaning that threads who are waiting for the mutex to be unlocked will not have to wait as relatively long as in the case of Part 2 (with a linked list). In the case of Part 2, the linear curve stays increasing at a relatively stable rate, as expected. Since the operations done on the linked list are slower, thus meaning the overhead associated with mutex-protecting of the critical section is expensive, and thus would have to increase with the increase of the number of threads.
+
 
 QUESTION 2.2.2 - scalability of spin locks
 
 Compare the variation in time per protected operation vs the number of threads for list operations protected by Mutex vs Spin locks. Comment on the general shapes of the curves, and explain why they have this shape.
 Comment on the relative rates of increase and differences in the shapes of the curves, and offer an explanation for these differences.
+
+The general trends that are depicted for both mutexes and spinlocks are that as we increase the number of threads, the time for a protected operation increases. This is expected, as there is necessary overhead to protect from race conditions appearing when operating on shared data. However, the rate of this increase in average waiting time is different between mutexes and spinlocks simply by the nature that each are implemented. As we continue to increase the number of threads, the time per protected operation using spinlocks continues to increase as well. The average waiting time for each thread when waiting for a spinlock to be unlocked is increased, as it eats up execution time while waiting for a resource to be unlocked (if it were instead blocked in the case of mutexes, its position in the CPU can be taken by another thread which could be potentially working with the resource that the first thread is waiting for, leading to less wait time). Therefore, as seen in the graphs, the per operation cost of mutexes tends to increase at a slower rate than for the spinlocks. Although spinlocks are great for their simplicity, mutexes seem to have the advantage of not wasting valuable execution time on the CPU while waiting for a resource to be available to it.

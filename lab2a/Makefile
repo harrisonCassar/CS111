@@ -548,7 +548,7 @@ tests: build
 	./lab2_add --threads=8 --iterations=10000 --sync=c --yield >> lab2_add.csv
 	./lab2_add --threads=12 --iterations=10000 --sync=c --yield >> lab2_add.csv
 
-	./lab2_add --threads=1 --iterations=1000 --sync=c --yield >> lab2_add.csv
+	./lab2_add --threads=1 --iterations=1000 --sync=s --yield >> lab2_add.csv
 	./lab2_add --threads=2 --iterations=1000 --sync=s --yield >> lab2_add.csv
 	./lab2_add --threads=4 --iterations=1000 --sync=s --yield >> lab2_add.csv
 	./lab2_add --threads=8 --iterations=1000 --sync=s --yield >> lab2_add.csv
