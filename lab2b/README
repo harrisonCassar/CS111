@@ -1,0 +1,58 @@
+NAME: Harrison Cassar
+EMAIL: Harrison.Cassar@gmail.com
+ID: 505114980
+
+Included Files:
+-lab2_add.c: a C program that implements and tests a shared variable add function, implements various yield/synchronization command-line options, and produces output statistics for the executions.
+-SortedList.h: header file describing the interfaces for a doubly linked list's operations
+-SortedList.c: a C module that implements insert, delete, lookup, and length methods for a sorted doubly linked list (described in the SortedList.h header file, including correct placement of yield calls).
+-lab2_list.c: a C program that implements and tests operations done on a shared linked list, implements various yield/synchronization command-line options, and produces output statistics for the executions.
+-Makefile: Makefile to build the deliverable programs (lab2_add and lab2_list), output, graphs, and tarball. Targets:
+	-build: (default target) compile all programs
+	-tests: run all (over 200) specified test cases to generate results in CSV files
+	-graphs: uses gnuplot(1) and the included data reduction scripts lab2_add.gp and lab2_list.gp to generate the required graphs
+-lab2_add.csv: contains all the statistical output for the Part-1 tests
+-lab2_list.csv: contains all the statistical output for the Part-2 tests
+-lab2_add graphs: created by running the graphs target in the Makefile
+	-lab2_add-1.png: threads and iterations required to generate a failure (with and without yields)
+	-lab2_add-2.png: average time per operation with and without yields.
+	-lab2_add-3.png: average time per (single threaded) operation vs. the number of iterations.
+	-lab2_add-4.png: threads and iterations that can run successfully with yields under each of the synchronization options.
+	-lab2_add-5.png: average time per (protected) operation vs. the number of threads.
+-lab2_list graphs: created by running the graphs target in the Makefile
+	-lab2_list-1.png: average time per (single threaded) unprotected operation vs. number of iterations (illustrating the correction of the per-operation cost for the list length).
+	-lab2_list-2.png: threads and iterations required to generate a failure (with and without yields).
+	-lab2_list-3.png: iterations that can run (protected) without failure.
+	-lab2_list-4.png: (length-adjusted) cost per operation vs the number of threads for the various synchronization options.
+-lab2_add.gp: provided data reduction script that generates the required graphs
+-lab2_list.gp: provided data reduction script that generates the required graphs
+
+Resources:
+-provided pthreads tutorial: https://computing.llnl.gov/tutorials/pthreads/
+-man pages for clock_gettime(2)
+-documentation for GCC atomic builtins
+-man pages and user manual for gnuplot(1)
+
+/* Questions */
+
+QUESTION 2.3.1 - Cycles in the basic list implementation:
+
+Where do you believe most of the cycles are spent in the 1 and 2-thread list tests ?
+-Since there exists little threads to contend for execution time on the CPU core (no contention in the case of 1 thread, a little in the case of 2 threads), most of the cycles in these tasks are spent actually peforming the task. As previously outlined, the tasks includes the operations of adding elements to a list, checking the length, and removing the elements from the list.
+
+Why do you believe these to be the most expensive parts of the code?
+-Performing the actual task is the most expensive parts of the code because there is little contention for acquiring the lock on the shared list data. Therefore, this means that threads are waiting little time (if any even at all) to acquire the lock to the shared list, meaning that the long time it takes to peform the operation (O(n) for an insertion, finding the length, and finding an element by key) will completely overpower the overhead associated with lock management. 
+
+Where do you believe most of the time/cycles are being spent in the high-thread spin-lock tests?
+-Most of the time/cycles in the high-thread spin-lock tests are spent on threads spinning during their entire allotted execution time. Threads who do not currently have the lock (and therefore cannot work on the shared list), will continue to loop over and over again, asking for access to the lock until the lock is eventually available. Since the threads do not yield when they do not successfully obtain the lock when first asking, all of this time is wasted, as the thread who potentially has the lock cannot execute as quickly (therefore cannot release the lock until much later).
+
+Where do you believe most of the time/cycles are being spent in the high-thread mutex tests?
+-Most of the time/cycles in the high-thread mutex tests are spent on the overhead associated with context switching between threads, as whenever a thread is context switched into the CPU core, it will ask for the lock. If it is unable to receive it (as only one thread can obtain the lock at a time), then it yields, leading to another context switch to another thread. This other thread, however, may not be the one with the lock either, therefore leading to another context switch. Eventually, the thread with the lock is able to execute its operations on the shared list, and eventually releases the lock for the same process to repeat again (but by this time, most of the time has been used on context switching from thread to thread).
+
+
+QUESTION 2.3.2 - Execution Profiling:
+Where (what lines of code) are consuming most of the cycles when the spin-lock version of the list exerciser is run with a large number of threads?
+-
+
+Why does this operation become so expensive with large numbers of threads?
+-
