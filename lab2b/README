@@ -48,7 +48,7 @@ Where do you believe most of the time/cycles are being spent in the high-thread 
 
 QUESTION 2.3.2 - Execution Profiling:
 Where (what lines of code) are consuming most of the cycles when the spin-lock version of the list exerciser is run with a large number of threads?
--The lines of code that are consuming most of the cycles with a large number of threads is the portion of the code within the actuall spinning-waiting implementation. This is specifically on lines 435, 477, and 543 of the lab2_list.c source code.
+-The lines of code that are consuming most of the cycles with a large number of threads is the portion of the code within the actual spinning-waiting implementation. This is specifically on lines 489, 566, and 739 (which is in a subroutine "thread_findMultiListLength", which is called by the "thread_manage_elements" function) of the lab2_list.c source code.
 
 Why does this operation become so expensive with large numbers of threads?
 -This operation becomes so expensive with a large number of threads simply because the full length of execution time that a thread is allotted is wasted "spinning" while waiting for a different thread (which potentially isn't even running) to release the lock on the shared data. Since the spinning thread does not yield/block itself, its execution time is essentially just wasted (this time could have been used to allow the thread currently holding the lock to potentially finish its operation on the shared data, thus leading to an unlocking of the lock it holds).

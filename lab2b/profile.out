@@ -1,0 +1,344 @@
+Total: 1055 samples
+     936  88.7%  88.7%     1055 100.0% thread_manage_elements
+      33   3.1%  91.8%       61   5.8% SortedList_lookup
+      23   2.2%  94.0%       58   5.5% SortedList_insert
+      13   1.2%  95.3%       13   1.2% ?? /usr/src/debug////////glibc-2.17-c758a686/string/../sysdeps/x86_64/multiarch/strcmp-sse42.S:165
+      12   1.1%  96.4%       12   1.1% ?? /usr/src/debug////////glibc-2.17-c758a686/string/../sysdeps/x86_64/multiarch/strcmp-sse42.S:1721
+      11   1.0%  97.4%       11   1.0% ?? /usr/src/debug////////glibc-2.17-c758a686/string/../sysdeps/x86_64/multiarch/strcmp-sse42.S:1729
+       7   0.7%  98.1%        7   0.7% ?? /usr/src/debug////////glibc-2.17-c758a686/string/../sysdeps/x86_64/multiarch/strcmp-sse42.S:1720
+       4   0.4%  98.5%        4   0.4% ?? /usr/src/debug////////glibc-2.17-c758a686/string/../sysdeps/x86_64/multiarch/strcmp-sse42.S:205
+       4   0.4%  98.9%        4   0.4% ?? /usr/src/debug////////glibc-2.17-c758a686/string/../sysdeps/x86_64/multiarch/strcmp-sse42.S:1714
+       3   0.3%  99.1%        3   0.3% ?? /usr/src/debug////////glibc-2.17-c758a686/string/../sysdeps/x86_64/multiarch/strcmp-sse42.S:202
+       3   0.3%  99.4%        3   0.3% ?? /usr/src/debug////////glibc-2.17-c758a686/string/../sysdeps/x86_64/multiarch/strcmp-sse42.S:1730
+       3   0.3%  99.7%        3   0.3% _init
+       1   0.1%  99.8%        1   0.1% ?? /usr/src/debug////////glibc-2.17-c758a686/string/../sysdeps/x86_64/multiarch/strcmp-sse42.S:130
+       1   0.1%  99.9%        1   0.1% ?? /usr/src/debug////////glibc-2.17-c758a686/string/../sysdeps/x86_64/multiarch/strcmp-sse42.S:134
+       1   0.1% 100.0%        1   0.1% ?? /usr/src/debug////////glibc-2.17-c758a686/string/../sysdeps/x86_64/multiarch/strcmp-sse42.S:160
+       0   0.0% 100.0%     1055 100.0% ?? /usr/src/debug////////glibc-2.17-c758a686/misc/../sysdeps/unix/sysv/linux/x86_64/clone.S:111
+       0   0.0% 100.0%     1055 100.0% start_thread
+ROUTINE ====================== thread_manage_elements in /u/cs/ugrad/cassar/cs111/lab2b/lab2_list.c
+   936   1055 Total samples (flat / cumulative)
+     .      .  438: 		}
+     .      .  439: 	}
+     .      .  440: }
+     .      .  441: 
+     .      .  442: void* thread_manage_elements(void* thread_id)
+---
+     .      .  443: {
+     .      .  444: 	struct timespec starttime;
+     .      .  445: 	struct timespec acquiretime;
+     .      .  446: 
+     .      .  447: 	long long* thread_num = (long long*) thread_id;
+     .      .  448: 
+     .      .  449: 	long long set_begin = (*thread_num - 1)*numIterations;
+     .      .  450: 	long long set_end = set_begin + numIterations - 1;
+     .      .  451: 
+     .      .  452: 	int sublistID;
+     .      .  453: 
+     .      .  454: 	//insert all allocated elements
+     .      .  455: 	for (long long i = set_begin; i <= set_end; i++)
+     .      .  456: 	{
+     .      .  457: 		sublistID = elements[i]->sublist_id;
+     .      .  458: 		switch (lockType)
+     .      .  459: 		{
+     .      .  460: 			default:
+     .      .  461: 			case SYNC_NONE:
+     .      .  462: 				SortedList_insert(lists[sublistID],elements[i]->element);
+     .      .  463: 				break;
+     .      .  464: 			case SYNC_MUTEX:
+     .      .  465: 				protected_clock_gettime(CLOCK_MONOTONIC,&starttime);
+     .      .  466: 				
+     .      .  467: 				if (pthread_mutex_lock(&(mutexlocks[sublistID])) != 0)
+     .      .  468: 				{
+     .      .  469: 					fprintf(stderr,"Error while attempting to lock mutex.\n");
+     .      .  470: 					exit(1);
+     .      .  471: 				}
+     .      .  472: 
+     .      .  473: 				protected_clock_gettime(CLOCK_MONOTONIC,&acquiretime);
+     .      .  474: 				timers[(int) *thread_num] += timeDifference(&starttime,&acquiretime);
+     .      .  475: 
+     .      .  476: 				SortedList_insert(lists[sublistID],elements[i]->element);
+     .      .  477: 
+     .      .  478: 				if (pthread_mutex_unlock(&(mutexlocks[sublistID])) != 0)
+     .      .  479: 				{
+     .      .  480: 					fprintf(stderr,"Error while attempting to unlock mutex.\n");
+     .      .  481: 					exit(1);
+     .      .  482: 				}
+     .      .  483: 
+     .      .  484: 				break;
+     .      .  485: 			case SYNC_SPINLOCK:
+     .      .  486: 				protected_clock_gettime(CLOCK_MONOTONIC,&starttime);
+     .      .  487: 
+     .      .  488: 				//wait until spinlock is 0 (unlocked) before moving on
+   495    495  489: 				while (__sync_lock_test_and_set(&(spinlocks[sublistID]),1));
+     .      .  490: 
+     .      .  491: 				protected_clock_gettime(CLOCK_MONOTONIC,&acquiretime);
+     .      .  492: 				timers[(int) *thread_num] += timeDifference(&starttime,&acquiretime);
+     .      .  493: 				
+     .     58  494: 				SortedList_insert(lists[sublistID],elements[i]->element);
+     .      .  495: 
+     1      1  496: 				__sync_lock_release(&(spinlocks[sublistID]));
+     .      .  497: 				break;
+     .      .  498: 		}
+     .      .  499: 	}
+     .      .  500: 
+     .      .  501: 	//find length of entire multi-list
+     .      .  502: 	thread_findMultiListLength(*thread_num);
+     .      .  503: 
+     .      .  504: 	//delete all allocated elements
+     .      .  505: 	SortedListElement_t* toDelete;
+     .      .  506: 
+     .      .  507: 	for (long long i = set_begin; i <= set_end; i++)
+     .      .  508: 	{
+     .      .  509: 		sublistID = elements[i]->sublist_id;
+     .      .  510: 		switch (lockType)
+     .      .  511: 		{
+     .      .  512: 			default:
+     .      .  513: 			case SYNC_NONE:
+     .      .  514: 				toDelete = SortedList_lookup(lists[sublistID],elements[i]->element->key);
+     .      .  515: 
+     .      .  516: 				if (toDelete == NULL)
+     .      .  517: 				{
+     .      .  518: 					fprintf(stderr, "Unexpected error: Lookup of previously added element to list has failed (non-existant).\n");
+     .      .  519: 					exit(2);
+     .      .  520: 				}
+     .      .  521: 
+     .      .  522: 				if (SortedList_delete(toDelete) == 1)
+     .      .  523: 				{
+     .      .  524: 					fprintf(stderr, "Unexpected error: Corrupted list found when attempting to delete element.\n");
+     .      .  525: 					exit(2);
+     .      .  526: 				}
+     .      .  527: 
+     .      .  528: 				break;
+     .      .  529: 			case SYNC_MUTEX:
+     .      .  530: 				protected_clock_gettime(CLOCK_MONOTONIC,&starttime);
+     .      .  531: 
+     .      .  532: 				if (pthread_mutex_lock(&(mutexlocks[sublistID])) != 0)
+     .      .  533: 				{
+     .      .  534: 					fprintf(stderr,"Error while attempting to lock mutex.\n");
+     .      .  535: 					exit(1);
+     .      .  536: 				}
+     .      .  537: 
+     .      .  538: 				protected_clock_gettime(CLOCK_MONOTONIC,&acquiretime);
+     .      .  539: 				timers[(int) *thread_num] += timeDifference(&starttime,&acquiretime);
+     .      .  540: 
+     .      .  541: 				toDelete = SortedList_lookup(lists[sublistID],elements[i]->element->key);
+     .      .  542: 
+     .      .  543: 				if (toDelete == NULL)
+     .      .  544: 				{
+     .      .  545: 					fprintf(stderr, "Unexpected error: Lookup of previously added element to list has failed (non-existant).\n");
+     .      .  546: 					exit(2);
+     .      .  547: 				}
+     .      .  548: 
+     .      .  549: 				if (SortedList_delete(toDelete) == 1)
+     .      .  550: 				{
+     .      .  551: 					fprintf(stderr, "Unexpected error: Corrupted list found when attempting to delete element.\n");
+     .      .  552: 					exit(2);
+     .      .  553: 				}
+     .      .  554: 
+     .      .  555: 				if (pthread_mutex_unlock(&(mutexlocks[sublistID])) != 0)
+     .      .  556: 				{
+     .      .  557: 					fprintf(stderr,"Error while attempting to unlock mutex.\n");
+     .      .  558: 					exit(1);
+     .      .  559: 				}
+     .      .  560: 
+     .      .  561: 				break;
+     .      .  562: 			case SYNC_SPINLOCK:
+     .      .  563: 				protected_clock_gettime(CLOCK_MONOTONIC,&starttime);
+     .      .  564: 
+     .      .  565: 				//wait until spinlock is 0 (unlocked) before moving on
+   440    440  566: 				while (__sync_lock_test_and_set(&(spinlocks[sublistID]),1));
+     .      .  567: 				
+     .      .  568: 				protected_clock_gettime(CLOCK_MONOTONIC,&acquiretime);
+     .      .  569: 				timers[(int) *thread_num] += timeDifference(&starttime,&acquiretime);
+     .      .  570: 
+     .     61  571: 				toDelete = SortedList_lookup(lists[sublistID],elements[i]->element->key);
+     .      .  572: 
+     .      .  573: 				if (toDelete == NULL)
+     .      .  574: 				{
+     .      .  575: 					fprintf(stderr, "Unexpected error: Lookup of previously added element to list has failed (non-existant).\n");
+     .      .  576: 					exit(2);
+     .      .  577: 				}
+     .      .  578: 
+     .      .  579: 				if (SortedList_delete(toDelete) == 1)
+     .      .  580: 				{
+     .      .  581: 					fprintf(stderr, "Unexpected error: Corrupted list found when attempting to delete element.\n");
+     .      .  582: 					exit(2);
+     .      .  583: 				}
+     .      .  584: 
+     .      .  585: 				__sync_lock_release(&(spinlocks[sublistID]));
+     .      .  586: 				break;
+     .      .  587: 		}
+     .      .  588: 	}
+     .      .  589: 
+     .      .  590: 	return NULL;
+     .      .  591: }
+---
+     .      .  592: 
+     .      .  593: void logResults(struct timespec* start, struct timespec* end)
+     .      .  594: {
+     .      .  595: 	char tag[TAG_MAXSIZE];
+     .      .  596: 	getTag(tag);
+ROUTINE ====================== thread_manage_elements in /u/cs/ugrad/cassar/cs111/lab2b/lab2_list.c
+   936   1055 Total samples (flat / cumulative)
+     .      .  438: 		}
+     .      .  439: 	}
+     .      .  440: }
+     .      .  441: 
+     .      .  442: void* thread_manage_elements(void* thread_id)
+---
+     .      .  443: {
+     .      .  444: 	struct timespec starttime;
+     .      .  445: 	struct timespec acquiretime;
+     .      .  446: 
+     .      .  447: 	long long* thread_num = (long long*) thread_id;
+     .      .  448: 
+     .      .  449: 	long long set_begin = (*thread_num - 1)*numIterations;
+     .      .  450: 	long long set_end = set_begin + numIterations - 1;
+     .      .  451: 
+     .      .  452: 	int sublistID;
+     .      .  453: 
+     .      .  454: 	//insert all allocated elements
+     .      .  455: 	for (long long i = set_begin; i <= set_end; i++)
+     .      .  456: 	{
+     .      .  457: 		sublistID = elements[i]->sublist_id;
+     .      .  458: 		switch (lockType)
+     .      .  459: 		{
+     .      .  460: 			default:
+     .      .  461: 			case SYNC_NONE:
+     .      .  462: 				SortedList_insert(lists[sublistID],elements[i]->element);
+     .      .  463: 				break;
+     .      .  464: 			case SYNC_MUTEX:
+     .      .  465: 				protected_clock_gettime(CLOCK_MONOTONIC,&starttime);
+     .      .  466: 				
+     .      .  467: 				if (pthread_mutex_lock(&(mutexlocks[sublistID])) != 0)
+     .      .  468: 				{
+     .      .  469: 					fprintf(stderr,"Error while attempting to lock mutex.\n");
+     .      .  470: 					exit(1);
+     .      .  471: 				}
+     .      .  472: 
+     .      .  473: 				protected_clock_gettime(CLOCK_MONOTONIC,&acquiretime);
+     .      .  474: 				timers[(int) *thread_num] += timeDifference(&starttime,&acquiretime);
+     .      .  475: 
+     .      .  476: 				SortedList_insert(lists[sublistID],elements[i]->element);
+     .      .  477: 
+     .      .  478: 				if (pthread_mutex_unlock(&(mutexlocks[sublistID])) != 0)
+     .      .  479: 				{
+     .      .  480: 					fprintf(stderr,"Error while attempting to unlock mutex.\n");
+     .      .  481: 					exit(1);
+     .      .  482: 				}
+     .      .  483: 
+     .      .  484: 				break;
+     .      .  485: 			case SYNC_SPINLOCK:
+     .      .  486: 				protected_clock_gettime(CLOCK_MONOTONIC,&starttime);
+     .      .  487: 
+     .      .  488: 				//wait until spinlock is 0 (unlocked) before moving on
+   495    495  489: 				while (__sync_lock_test_and_set(&(spinlocks[sublistID]),1));
+     .      .  490: 
+     .      .  491: 				protected_clock_gettime(CLOCK_MONOTONIC,&acquiretime);
+     .      .  492: 				timers[(int) *thread_num] += timeDifference(&starttime,&acquiretime);
+     .      .  493: 				
+     .     58  494: 				SortedList_insert(lists[sublistID],elements[i]->element);
+     .      .  495: 
+     1      1  496: 				__sync_lock_release(&(spinlocks[sublistID]));
+     .      .  497: 				break;
+     .      .  498: 		}
+     .      .  499: 	}
+     .      .  500: 
+     .      .  501: 	//find length of entire multi-list
+     .      .  502: 	thread_findMultiListLength(*thread_num);
+     .      .  503: 
+     .      .  504: 	//delete all allocated elements
+     .      .  505: 	SortedListElement_t* toDelete;
+     .      .  506: 
+     .      .  507: 	for (long long i = set_begin; i <= set_end; i++)
+     .      .  508: 	{
+     .      .  509: 		sublistID = elements[i]->sublist_id;
+     .      .  510: 		switch (lockType)
+     .      .  511: 		{
+     .      .  512: 			default:
+     .      .  513: 			case SYNC_NONE:
+     .      .  514: 				toDelete = SortedList_lookup(lists[sublistID],elements[i]->element->key);
+     .      .  515: 
+     .      .  516: 				if (toDelete == NULL)
+     .      .  517: 				{
+     .      .  518: 					fprintf(stderr, "Unexpected error: Lookup of previously added element to list has failed (non-existant).\n");
+     .      .  519: 					exit(2);
+     .      .  520: 				}
+     .      .  521: 
+     .      .  522: 				if (SortedList_delete(toDelete) == 1)
+     .      .  523: 				{
+     .      .  524: 					fprintf(stderr, "Unexpected error: Corrupted list found when attempting to delete element.\n");
+     .      .  525: 					exit(2);
+     .      .  526: 				}
+     .      .  527: 
+     .      .  528: 				break;
+     .      .  529: 			case SYNC_MUTEX:
+     .      .  530: 				protected_clock_gettime(CLOCK_MONOTONIC,&starttime);
+     .      .  531: 
+     .      .  532: 				if (pthread_mutex_lock(&(mutexlocks[sublistID])) != 0)
+     .      .  533: 				{
+     .      .  534: 					fprintf(stderr,"Error while attempting to lock mutex.\n");
+     .      .  535: 					exit(1);
+     .      .  536: 				}
+     .      .  537: 
+     .      .  538: 				protected_clock_gettime(CLOCK_MONOTONIC,&acquiretime);
+     .      .  539: 				timers[(int) *thread_num] += timeDifference(&starttime,&acquiretime);
+     .      .  540: 
+     .      .  541: 				toDelete = SortedList_lookup(lists[sublistID],elements[i]->element->key);
+     .      .  542: 
+     .      .  543: 				if (toDelete == NULL)
+     .      .  544: 				{
+     .      .  545: 					fprintf(stderr, "Unexpected error: Lookup of previously added element to list has failed (non-existant).\n");
+     .      .  546: 					exit(2);
+     .      .  547: 				}
+     .      .  548: 
+     .      .  549: 				if (SortedList_delete(toDelete) == 1)
+     .      .  550: 				{
+     .      .  551: 					fprintf(stderr, "Unexpected error: Corrupted list found when attempting to delete element.\n");
+     .      .  552: 					exit(2);
+     .      .  553: 				}
+     .      .  554: 
+     .      .  555: 				if (pthread_mutex_unlock(&(mutexlocks[sublistID])) != 0)
+     .      .  556: 				{
+     .      .  557: 					fprintf(stderr,"Error while attempting to unlock mutex.\n");
+     .      .  558: 					exit(1);
+     .      .  559: 				}
+     .      .  560: 
+     .      .  561: 				break;
+     .      .  562: 			case SYNC_SPINLOCK:
+     .      .  563: 				protected_clock_gettime(CLOCK_MONOTONIC,&starttime);
+     .      .  564: 
+     .      .  565: 				//wait until spinlock is 0 (unlocked) before moving on
+   440    440  566: 				while (__sync_lock_test_and_set(&(spinlocks[sublistID]),1));
+     .      .  567: 				
+     .      .  568: 				protected_clock_gettime(CLOCK_MONOTONIC,&acquiretime);
+     .      .  569: 				timers[(int) *thread_num] += timeDifference(&starttime,&acquiretime);
+     .      .  570: 
+     .     61  571: 				toDelete = SortedList_lookup(lists[sublistID],elements[i]->element->key);
+     .      .  572: 
+     .      .  573: 				if (toDelete == NULL)
+     .      .  574: 				{
+     .      .  575: 					fprintf(stderr, "Unexpected error: Lookup of previously added element to list has failed (non-existant).\n");
+     .      .  576: 					exit(2);
+     .      .  577: 				}
+     .      .  578: 
+     .      .  579: 				if (SortedList_delete(toDelete) == 1)
+     .      .  580: 				{
+     .      .  581: 					fprintf(stderr, "Unexpected error: Corrupted list found when attempting to delete element.\n");
+     .      .  582: 					exit(2);
+     .      .  583: 				}
+     .      .  584: 
+     .      .  585: 				__sync_lock_release(&(spinlocks[sublistID]));
+     .      .  586: 				break;
+     .      .  587: 		}
+     .      .  588: 	}
+     .      .  589: 
+     .      .  590: 	return NULL;
+     .      .  591: }
+---
+     .      .  592: 
+     .      .  593: void logResults(struct timespec* start, struct timespec* end)
+     .      .  594: {
+     .      .  595: 	char tag[TAG_MAXSIZE];
+     .      .  596: 	getTag(tag);

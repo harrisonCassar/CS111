@@ -601,8 +601,6 @@ void logResults(struct timespec* start, struct timespec* end)
 
 	long avgTimePerOperation = runTime / numOperations;
 
-	long throughput = 1000000000/avgTimePerOperation;
-
 	long avgWaitForLock = 0;
 	if (lockType != SYNC_NONE)
 	{
@@ -612,7 +610,7 @@ void logResults(struct timespec* start, struct timespec* end)
 		avgWaitForLock /= numOperations;
 	}
 
-	fprintf(stdout,"%s,%lld,%lld,%d,%ld,%ld,%ld,%ld,%ld\n",tag,numThreads,numIterations,numLists,numOperations,runTime,avgTimePerOperation,avgWaitForLock,throughput);
+	fprintf(stdout,"%s,%lld,%lld,%d,%ld,%ld,%ld,%ld\n",tag,numThreads,numIterations,numLists,numOperations,runTime,avgTimePerOperation,avgWaitForLock);
 }
 
 long timeDifference(struct timespec* start, struct timespec* end)

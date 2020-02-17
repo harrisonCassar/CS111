@@ -29,9 +29,9 @@ set key right top
 
 # grep out only needed
 plot \
-    "< grep -E 'list-none-m,[0-9]*,1000,1,' lab2_list.csv" using ($2):($9) \
+    "< grep -E 'list-none-m,[0-9]*,1000,1,' lab2b_list.csv" using ($2):(1000000000/($7)) \
 	title 'mutex' with linespoints lc rgb 'blue', \
-    "< grep -E 'list-none-s,[0-9]*,1000,1,' lab2_list.csv" using ($2):($9) \
+    "< grep -E 'list-none-s,[0-9]*,1000,1,' lab2b_list.csv" using ($2):(1000000000/($7)) \
 	title 'spin' with linespoints lc rgb 'orange'
 
 
@@ -48,9 +48,9 @@ set key right top
 
 # grep out only needed
 plot \
-    "< grep -E 'list-none-m,[0-9]*,1000,1,' lab2_list.csv" using ($2):($8) \
+    "< grep -E 'list-none-m,[0-9]*,1000,1,' lab2b_list.csv" using ($2):($8) \
 	title 'wait-for-lock time' with linespoints lc rgb 'red', \
-    "< grep -E 'list-none-m,[0-9]*,1000,1,' lab2_list.csv" using ($2):($7) \
+    "< grep -E 'list-none-m,[0-9]*,1000,1,' lab2b_list.csv" using ($2):($7) \
 	title 'avg operation time' with linespoints lc rgb 'green'
 
 set title "List2b-3: Synchronization Method vs. # of Iterations that run without failure"
@@ -63,11 +63,11 @@ set logscale y 10
 set output 'lab2b_3.png'
 # note that unsuccessful runs should have produced no output
 plot \
-    "< grep 'list-id-none,[0-9]*,[0-9]*,4,' lab2_list.csv" using ($2):($3) \
+    "< grep 'list-id-none,[0-9]*,[0-9]*,4,' lab2b_list.csv" using ($2):($3) \
 	title 'none' with points lc rgb 'green', \
-    "< grep 'list-id-m,[0-9]*,[0-9]*,4,' lab2_list.csv" using ($2):($3) \
+    "< grep 'list-id-m,[0-9]*,[0-9]*,4,' lab2b_list.csv" using ($2):($3) \
 	title 'mutex' with points lc rgb 'blue', \
-	"< grep 'list-id-s,[0-9]*,[0-9]*,4,' lab2_list.csv" using ($2):($3) \
+	"< grep 'list-id-s,[0-9]*,[0-9]*,4,' lab2b_list.csv" using ($2):($3) \
 	title 'spin' with points lc rgb 'orange'
 
 set title "List2b-4: Performance of Mutex Synchronization with Different # of Lists"
@@ -80,13 +80,13 @@ set logscale y 10
 set output 'lab2b_4.png'
 # note that unsuccessful runs should have produced no output
 plot \
-    "< grep 'list-none-m,[0-9]*,[0-9]*,1,' lab2_list.csv" using ($2):($9) \
+    "< grep 'list-none-m,[0-9]*,[0-9]*,1,' lab2b_list.csv" using ($2):(1000000000/($7)) \
 	title 'lists=1' with linespoints lc rgb 'green', \
-    "< grep 'list-none-m,[0-9]*,[0-9]*,4,' lab2_list.csv" using ($2):($9) \
+    "< grep 'list-none-m,[0-9]*,[0-9]*,4,' lab2b_list.csv" using ($2):(1000000000/($7)) \
 	title 'lists=4' with linespoints lc rgb 'blue', \
-	"< grep 'list-none-m,[0-9]*,[0-9]*,8,' lab2_list.csv" using ($2):($9) \
+	"< grep 'list-none-m,[0-9]*,[0-9]*,8,' lab2b_list.csv" using ($2):(1000000000/($7)) \
 	title 'lists=8' with linespoints lc rgb 'red', \
-	"< grep 'list-none-m,[0-9]*,[0-9]*,16,' lab2_list.csv" using ($2):($9) \
+	"< grep 'list-none-m,[0-9]*,[0-9]*,16,' lab2b_list.csv" using ($2):(1000000000/($7)) \
 	title 'lists=16' with linespoints lc rgb 'orange'
 
 set title "List2b-5: Performance of Spinlock Synchronization with Different # of Lists"
@@ -99,11 +99,11 @@ set logscale y 10
 set output 'lab2b_5.png'
 # note that unsuccessful runs should have produced no output
 plot \
-    "< grep 'list-none-s,[0-9]*,[0-9]*,1,' lab2_list.csv" using ($2):($9) \
+    "< grep 'list-none-s,[0-9]*,[0-9]*,1,' lab2b_list.csv" using ($2):(1000000000/($7)) \
 	title 'lists=1' with linespoints lc rgb 'green', \
-    "< grep 'list-none-s,[0-9]*,[0-9]*,4,' lab2_list.csv" using ($2):($9) \
+    "< grep 'list-none-s,[0-9]*,[0-9]*,4,' lab2b_list.csv" using ($2):(1000000000/($7)) \
 	title 'lists=4' with linespoints lc rgb 'blue', \
-	"< grep 'list-none-s,[0-9]*,[0-9]*,8,' lab2_list.csv" using ($2):($9) \
+	"< grep 'list-none-s,[0-9]*,[0-9]*,8,' lab2b_list.csv" using ($2):(1000000000/($7)) \
 	title 'lists=8' with linespoints lc rgb 'red', \
-	"< grep 'list-none-s,[0-9]*,[0-9]*,16,' lab2_list.csv" using ($2):($9) \
+	"< grep 'list-none-s,[0-9]*,[0-9]*,16,' lab2b_list.csv" using ($2):(1000000000/($7)) \
 	title 'lists=16' with linespoints lc rgb 'orange'
