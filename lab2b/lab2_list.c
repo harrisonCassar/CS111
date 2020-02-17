@@ -21,8 +21,14 @@ void* thread_manage_elements(void* thread_id);
 void getRandKey(char* buf);
 void logResults(struct timespec* start, struct timespec* end);
 void createElements();
-void freeElements();
+void createLists();
+void freeMemory();
 void getTag(char* buf);
+void protected_clock_gettime(clockid_t clk_id, struct timespec *tp);
+long timeDifference(struct timespec* start, struct timespec* end);
+int getSublistAssignment(char* key);
+void thread_findMultiListLength(long long thread_num);
+void unprotected_findMultiListLength();
 
 #define KEYSIZE 11 //1 extra for null byte
 #define TAG_MAXSIZE 15
@@ -40,59 +46,41 @@ struct option long_options[] =
 	{0, 0, 0, 0} //last element of long_options array must contain all 0's (end)
 };
 
+typedef struct {
+	int sublist_id;
+	SortedListElement_t* element;
+} SublistedElement;
+
 //Globals
 long long numThreads = 1; //default 1
 long long numIterations = 1; //default 1
-long long numLists = 1; //default 1
+int numLists = 1; //default 1
 long long numElements;
 int lockType = SYNC_NONE;
 
 int opt_yield = 0;
 char yieldopts[5] = "-";
 
-SortedList_t head;
-SortedListElement_t** elements; //array of ptrs to list elements
+SortedList_t** lists = NULL; //array of ptrs to headers of sublists
+SublistedElement** elements = NULL; //array of ptrs to "SublistedElement" struct, which contains a ptr to a list element
 
 pthread_t* tid = NULL;
+long* timers = NULL;
 long long* thread_instance = NULL;
-pthread_mutex_t mutexlock;
-int spinlock = 0;
+pthread_mutex_t* mutexlocks = NULL;
+int* spinlocks = NULL;
 
 int main(int argc, char* argv[])
 {
 	parseOptions(argc,argv);
-
+	
 	//setup necessary structures
-	if (lockType == SYNC_MUTEX)
-		pthread_mutex_init(&mutexlock,NULL);
-
 	createElements();
-
-	//setup necessary structures
-	head.next = &head;
-	head.prev = &head;
-	head.key = NULL;
+	createLists();
 
 	//note start time
 	struct timespec starttime;
-	if (clock_gettime(CLOCK_MONOTONIC,&starttime) == -1)
-	{
-		fprintf(stderr,"Error: %s; ", strerror(errno));
-        switch (errno)
-        {
-        	case EFAULT:
-        		fprintf(stderr,"Attempted recording of start time failed because timespec struct ptr points outside the accessible address space.\n");
-        		break;
-        	case EINVAL:
-        		fprintf(stderr,"Attempted recording of start time failed because specified 'CLOCK_MONOTONIC' is not supported on this system.\n");
-            	break;
-            default:
-            	fprintf(stderr,"Attempted recording of start time failed with an unrecognized error.\n");
-            	break;
-        }
-		
-		exit(1);
-	}
+	protected_clock_gettime(CLOCK_MONOTONIC,&starttime);
 
 	if (signal(SIGSEGV,sighandler) == SIG_ERR)
 	{
@@ -108,31 +96,10 @@ int main(int argc, char* argv[])
 
 	//note end time
 	struct timespec endtime;
-	if (clock_gettime(CLOCK_MONOTONIC,&endtime) == -1)
-	{
-		fprintf(stderr,"Error: %s; ", strerror(errno));
-        switch (errno)
-        {
-        	case EFAULT:
-        		fprintf(stderr,"Attempted recording of end time failed because timespec struct ptr points outside the accessible address space.\n");
-        		break;
-        	case EINVAL:
-        		fprintf(stderr,"Attempted recording of end time failed because specified 'CLOCK_MONOTONIC' is not supported on this system.\n");
-            	break;
-            default:
-            	fprintf(stderr,"Attempted recording of end time failed with an unrecognized error.\n");
-            	break;
-        }
-		
-		exit(1);
-	}
+	protected_clock_gettime(CLOCK_MONOTONIC,&endtime);
 
-	int length = SortedList_length(&head);
-	if (length != 0)
-	{
-		fprintf(stderr, "Error in main thread: Length of list is not 0 as expected. Length is: %d\n", length);
-		exit(2);
-	}
+	//check to make sure multi-list length is 0 (all sublists have 0 length)
+	unprotected_findMultiListLength();
 
 	//print to stdout CSV record
 	logResults(&starttime,&endtime);
@@ -254,7 +221,7 @@ void parseOptions(int argc, char** argv)
 
 	if (numLists < 0)
 	{
-		fprintf(stderr,"Specified # of lists '%lld' cannot be negative. Please pick a different #.\n", numLists);
+		fprintf(stderr,"Specified # of lists '%d' cannot be negative. Please pick a different #.\n", numLists);
 		exit(1);
 	}
 
@@ -275,17 +242,21 @@ void sighandler()
 void createElements()
 {
 	numElements = numThreads*numIterations;
-	elements = calloc(numElements,sizeof(SortedListElement_t*));
+	elements = calloc(numElements,sizeof(SublistedElement*));
 	
 	if (elements == NULL)
 		exit(2);
 
-	atexit(freeElements);
+	atexit(freeMemory);
 
 	for (int i = 0; i < numElements; i++)
 	{
-		elements[i] = malloc(sizeof(SortedListElement_t));
+		elements[i] = malloc(sizeof(SublistedElement));
 		if (elements[i] == NULL)
+			exit(2);
+
+		elements[i]->element = malloc(sizeof(SortedListElement_t));
+		if (elements[i]->element == NULL)
 			exit(2);
 
 		char* key = (char *) malloc((KEYSIZE)*sizeof(char));
@@ -293,25 +264,93 @@ void createElements()
 			exit(2);
 
 		getRandKey(key);
+		elements[i]->element->key = key;
 
-		elements[i]->key = key;
+		elements[i]->sublist_id = getSublistAssignment(key);
+	}
+
+	timers = calloc(numThreads,sizeof(long));
+
+	if (timers == NULL)
+		exit(2);
+}
+
+void createLists()
+{
+	lists = calloc(numLists,sizeof(SortedList_t*));
+
+	if (lists == NULL)
+		exit(2);
+
+	if (lockType == SYNC_MUTEX)
+	{
+		mutexlocks = malloc(numLists*sizeof(pthread_mutex_t));
+		if (mutexlocks == NULL)
+			exit(2);
+
+		for (int i = 0; i < numLists; i++)
+			pthread_mutex_init(&(mutexlocks[i]),NULL);
+	}
+	else if (lockType == SYNC_SPINLOCK)
+	{
+		spinlocks = calloc(numLists,sizeof(int));
+		if (spinlocks == NULL)
+			exit(2);
+	}
+
+	for (int i = 0; i < numLists; i++)
+	{
+		lists[i] = malloc(sizeof(SortedList_t));
+		if (lists[i] == NULL)
+			exit(2);
+
+		lists[i]->next = lists[i];
+		lists[i]->prev = lists[i];
+		lists[i]->key = NULL;
 	}
 }
 
-void freeElements()
+void freeMemory()
 {
+	//free element and list header pools
 	for (int i = 0; i < numElements; i++)
 	{
 		if (elements[i] != NULL)
 		{
-			if (elements[i]->key != NULL)
-				free((char *) elements[i]->key);
+			if (elements[i]->element != NULL)
+			{
+				if (elements[i]->element->key != NULL)
+					free((char *) elements[i]->element->key);
+
+				free(elements[i]->element);
+			}
 
 			free(elements[i]);
 		}
 	}
 
-	free(elements);
+	if (elements != NULL)
+		free(elements);
+
+	for (int i = 0; i < numLists; i++)
+	{
+		if (lists[i] != NULL)
+			free(lists[i]);
+	}
+
+	if (lists != NULL)
+		free(lists);	
+
+	//free locks associated with sublists
+	if (mutexlocks != NULL)
+		free(mutexlocks);
+
+	if (spinlocks != NULL)
+		free(spinlocks);
+
+	//free thread-related memory
+	if (timers != NULL)
+		free(timers); 
 
 	if (tid != NULL)
 		free(tid);
@@ -402,27 +441,41 @@ void joinThreads(long numOfThreads)
 
 void* thread_manage_elements(void* thread_id)
 {
+	struct timespec starttime;
+	struct timespec acquiretime;
+
 	long long* thread_num = (long long*) thread_id;
 
 	long long set_begin = (*thread_num - 1)*numIterations;
 	long long set_end = set_begin + numIterations - 1;
 
+	int sublistID;
+
+	//insert all allocated elements
 	for (long long i = set_begin; i <= set_end; i++)
 	{
+		sublistID = elements[i]->sublist_id;
 		switch (lockType)
 		{
 			default:
 			case SYNC_NONE:
-				SortedList_insert(&head,elements[i]);
+				SortedList_insert(lists[sublistID],elements[i]->element);
 				break;
 			case SYNC_MUTEX:
-				if (pthread_mutex_lock(&mutexlock) != 0)
+				protected_clock_gettime(CLOCK_MONOTONIC,&starttime);
+				
+				if (pthread_mutex_lock(&(mutexlocks[sublistID])) != 0)
 				{
 					fprintf(stderr,"Error while attempting to lock mutex.\n");
 					exit(1);
 				}
-				SortedList_insert(&head,elements[i]);
-				if (pthread_mutex_unlock(&mutexlock) != 0)
+
+				protected_clock_gettime(CLOCK_MONOTONIC,&acquiretime);
+				timers[(int) *thread_num] += timeDifference(&starttime,&acquiretime);
+
+				SortedList_insert(lists[sublistID],elements[i]->element);
+
+				if (pthread_mutex_unlock(&(mutexlocks[sublistID])) != 0)
 				{
 					fprintf(stderr,"Error while attempting to unlock mutex.\n");
 					exit(1);
@@ -430,71 +483,35 @@ void* thread_manage_elements(void* thread_id)
 
 				break;
 			case SYNC_SPINLOCK:
+				protected_clock_gettime(CLOCK_MONOTONIC,&starttime);
 
 				//wait until spinlock is 0 (unlocked) before moving on
-				while (__sync_lock_test_and_set(&spinlock,1));
-				
-				SortedList_insert(&head,elements[i]);
+				while (__sync_lock_test_and_set(&(spinlocks[sublistID]),1));
 
-				__sync_lock_release(&spinlock);
+				protected_clock_gettime(CLOCK_MONOTONIC,&acquiretime);
+				timers[(int) *thread_num] += timeDifference(&starttime,&acquiretime);
+				
+				SortedList_insert(lists[sublistID],elements[i]->element);
+
+				__sync_lock_release(&(spinlocks[sublistID]));
 				break;
 		}
 	}
 
-	switch (lockType)
-	{
-		default:
-		case SYNC_NONE:
-			if (SortedList_length(&head) == -1)
-			{
-				fprintf(stderr, "Unexpected error: List found to be corrupted upon requesting its length.\n");
-				exit(2);
-			}
-			break;
-		case SYNC_MUTEX:
-			if (pthread_mutex_lock(&mutexlock) != 0)
-			{
-				fprintf(stderr,"Error while attempting to lock mutex.\n");
-				exit(1);
-			}
+	//find length of entire multi-list
+	thread_findMultiListLength(*thread_num);
 
-			if (SortedList_length(&head) == -1)
-			{
-				fprintf(stderr, "Unexpected error: List found to be corrupted upon requesting its length.\n");
-				exit(2);
-			}
-
-			if (pthread_mutex_unlock(&mutexlock) != 0)
-			{
-				fprintf(stderr,"Error while attempting to unlock mutex.\n");
-				exit(1);
-			}
-
-			break;
-		case SYNC_SPINLOCK:
-
-			//wait until spinlock is 0 (unlocked) before moving on
-			while (__sync_lock_test_and_set(&spinlock,1));
-			
-			if (SortedList_length(&head) == -1)
-			{
-				fprintf(stderr, "Unexpected error: List found to be corrupted upon requesting its length.\n");
-				exit(2);
-			}
-
-			__sync_lock_release(&spinlock);
-			break;
-	}
-
+	//delete all allocated elements
 	SortedListElement_t* toDelete;
 
 	for (long long i = set_begin; i <= set_end; i++)
 	{
+		sublistID = elements[i]->sublist_id;
 		switch (lockType)
 		{
 			default:
 			case SYNC_NONE:
-				toDelete = SortedList_lookup(&head,elements[i]->key);
+				toDelete = SortedList_lookup(lists[sublistID],elements[i]->element->key);
 
 				if (toDelete == NULL)
 				{
@@ -510,13 +527,18 @@ void* thread_manage_elements(void* thread_id)
 
 				break;
 			case SYNC_MUTEX:
-				if (pthread_mutex_lock(&mutexlock) != 0)
+				protected_clock_gettime(CLOCK_MONOTONIC,&starttime);
+
+				if (pthread_mutex_lock(&(mutexlocks[sublistID])) != 0)
 				{
 					fprintf(stderr,"Error while attempting to lock mutex.\n");
 					exit(1);
 				}
 
-				toDelete = SortedList_lookup(&head,elements[i]->key);
+				protected_clock_gettime(CLOCK_MONOTONIC,&acquiretime);
+				timers[(int) *thread_num] += timeDifference(&starttime,&acquiretime);
+
+				toDelete = SortedList_lookup(lists[sublistID],elements[i]->element->key);
 
 				if (toDelete == NULL)
 				{
@@ -530,7 +552,7 @@ void* thread_manage_elements(void* thread_id)
 					exit(2);
 				}
 
-				if (pthread_mutex_unlock(&mutexlock) != 0)
+				if (pthread_mutex_unlock(&(mutexlocks[sublistID])) != 0)
 				{
 					fprintf(stderr,"Error while attempting to unlock mutex.\n");
 					exit(1);
@@ -538,11 +560,15 @@ void* thread_manage_elements(void* thread_id)
 
 				break;
 			case SYNC_SPINLOCK:
+				protected_clock_gettime(CLOCK_MONOTONIC,&starttime);
 
 				//wait until spinlock is 0 (unlocked) before moving on
-				while (__sync_lock_test_and_set(&spinlock,1));
+				while (__sync_lock_test_and_set(&(spinlocks[sublistID]),1));
 				
-				toDelete = SortedList_lookup(&head,elements[i]->key);
+				protected_clock_gettime(CLOCK_MONOTONIC,&acquiretime);
+				timers[(int) *thread_num] += timeDifference(&starttime,&acquiretime);
+
+				toDelete = SortedList_lookup(lists[sublistID],elements[i]->element->key);
 
 				if (toDelete == NULL)
 				{
@@ -556,7 +582,7 @@ void* thread_manage_elements(void* thread_id)
 					exit(2);
 				}
 
-				__sync_lock_release(&spinlock);
+				__sync_lock_release(&(spinlocks[sublistID]));
 				break;
 		}
 	}
@@ -571,17 +597,29 @@ void logResults(struct timespec* start, struct timespec* end)
 	
 	long numOperations = numThreads*numIterations*3;
 
-	int numLists = 1;
-
-	time_t dsec = end->tv_sec - start->tv_sec;
-	long dnsec = end->tv_nsec - start->tv_nsec;
-	long runTime = dsec*1000000000 + dnsec;
+	long runTime = timeDifference(start,end);
 
 	long avgTimePerOperation = runTime / numOperations;
 
 	long throughput = 1000000000/avgTimePerOperation;
 
-	fprintf(stdout,"%s,%lld,%lld,%d,%ld,%ld,%ld,%ld\n",tag,numThreads,numIterations,numLists,numOperations,runTime,avgTimePerOperation,throughput);
+	long avgWaitForLock = 0;
+	if (lockType != SYNC_NONE)
+	{
+		for (int i=0; i < numThreads; i++)
+			avgWaitForLock += timers[i];
+
+		avgWaitForLock /= numOperations;
+	}
+
+	fprintf(stdout,"%s,%lld,%lld,%d,%ld,%ld,%ld,%ld,%ld\n",tag,numThreads,numIterations,numLists,numOperations,runTime,avgTimePerOperation,avgWaitForLock,throughput);
+}
+
+long timeDifference(struct timespec* start, struct timespec* end)
+{
+	time_t dsec = end->tv_sec - start->tv_sec;
+	long dnsec = end->tv_nsec - start->tv_nsec;
+	return dsec*1000000000 + dnsec;
 }
 
 void getTag(char* buf)
@@ -615,5 +653,121 @@ void getTag(char* buf)
 		case SYNC_SPINLOCK:
 			strcat(buf,"s");
 			break;
+	}
+}
+
+void protected_clock_gettime(clockid_t clk_id, struct timespec *tp)
+{
+	if (clock_gettime(clk_id,tp) == -1)
+	{
+		fprintf(stderr,"Error: %s; ", strerror(errno));
+        switch (errno)
+        {
+        	case EFAULT:
+        		fprintf(stderr,"Attempted recording of time failed because timespec struct ptr points outside the accessible address space.\n");
+        		break;
+        	case EINVAL:
+        		fprintf(stderr,"Attempted recording of time failed because specified clock is not supported on this system.\n");
+            	break;
+            default:
+            	fprintf(stderr,"Attempted recording of time failed with an unrecognized error.\n");
+            	break;
+        }
+		
+		exit(1);
+	}
+}
+
+int getSublistAssignment(char* key)
+{
+	int keyval = 0;
+
+	for (int i = 0; i < KEYSIZE; i++)
+		keyval += (int) key[i];
+
+	return keyval % numLists;
+}
+
+void thread_findMultiListLength(long long thread_num)
+{
+	struct timespec starttime;
+	struct timespec acquiretime;
+ 
+	for (int i = 0; i < numLists; i++)
+	{
+		//obtain lock for certain list
+		switch (lockType)
+		{
+			default:
+			case SYNC_NONE:
+				if (SortedList_length(lists[i]) == -1)
+				{
+					fprintf(stderr, "Unexpected error: List found to be corrupted upon requesting its length.\n");
+					exit(2);
+				}
+				
+				break;
+			case SYNC_MUTEX:
+				protected_clock_gettime(CLOCK_MONOTONIC,&starttime);
+
+				if (pthread_mutex_lock(&(mutexlocks[i])) != 0)
+				{
+					fprintf(stderr,"Error while attempting to lock mutex.\n");
+					exit(1);
+				}
+
+				protected_clock_gettime(CLOCK_MONOTONIC,&acquiretime);
+				timers[(int) thread_num] += timeDifference(&starttime,&acquiretime);
+
+				if (SortedList_length(lists[i]) == -1)
+				{
+					fprintf(stderr, "Unexpected error: List found to be corrupted upon requesting its length.\n");
+					exit(2);
+				}
+
+				if (pthread_mutex_unlock(&(mutexlocks[i])) != 0)
+				{
+					fprintf(stderr,"Error while attempting to unlock mutex.\n");
+					exit(1);
+				}
+
+				break;
+			case SYNC_SPINLOCK:
+				protected_clock_gettime(CLOCK_MONOTONIC,&starttime);
+
+				//wait until spinlock is 0 (unlocked) before moving on
+				while (__sync_lock_test_and_set(&(spinlocks[i]),1));
+				
+				protected_clock_gettime(CLOCK_MONOTONIC,&acquiretime);
+				timers[(int) thread_num] += timeDifference(&starttime,&acquiretime);
+
+				if (SortedList_length(lists[i]) == -1)
+				{
+					fprintf(stderr, "Unexpected error: List found to be corrupted upon requesting its length.\n");
+					exit(2);
+				}
+
+				__sync_lock_release(&(spinlocks[i]));
+				break;
+		}
+	}
+}
+
+void unprotected_findMultiListLength()
+{
+	for (int i = 0; i < numLists; i++)
+	{
+		int length = SortedList_length(lists[i]);
+		if (length == -1)
+		{
+			fprintf(stderr, "Unexpected error: List found to be corrupted upon requesting its length.\n");
+			exit(2);
+		}
+
+		if (length != 0)
+		{
+			fprintf(stderr, "Error in main thread: Length of a sublist is not 0 as expected. Length is: %d\n", length);
+			exit(2);
+		}
 	}
 }
