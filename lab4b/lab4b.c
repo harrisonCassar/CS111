@@ -250,7 +250,7 @@ void parseOptions(int argc, char** argv)
 		{
 			default:
 			case '?':
-				fprintf(stderr, "Specified option '%s' not recognized.\nusage: %s [--period=#] [--scale=[FC]] [--log=filepath]\n\t--period: specifies the time interval in-between temperature sensor readings.\n\t--scale: specifies temperature reading scale (F for Fahrenheit [default], C for Celsius).\n\t--log: log all inputted commands and reading reports to the specified logfile.\n\n", argv[optind-1], argv[0]);
+				fprintf(stderr, "Specified option not recognized.\nusage: %s [--period=#] [--scale=[FC]] [--log=filepath]\n\t--period: specifies the time interval in-between temperature sensor readings.\n\t--scale: specifies temperature reading scale (F for Fahrenheit [default], C for Celsius).\n\t--log: log all inputted commands and reading reports to the specified logfile.\n\n", argv[0]);
 				exit(1);
 			case 'p':
 				raw_period = optarg;

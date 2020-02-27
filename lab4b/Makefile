@@ -16,12 +16,13 @@ CLIBRARIES = -lmraa -lm
 default:
 	$(CC) $(CFLAGS) $(CLIBRARIES) -o lab4b lab4b.c 
 
+# perform smoke tests
 check:
-	echo 'perform checks...'
+	./smoketest.sh
 
 # build the distribution tarball
 dist:
-	tar -zvcf lab4b-505114980.tar.gz Makefile README lab4b.c
+	tar -zvcf lab4b-505114980.tar.gz Makefile README lab4b.c smoketest.sh
 
 # delete all files created by the Makefile, and return the directory to its freshly untared state
 clean:
