@@ -1,0 +1,11 @@
+NAME: Harrison Cassar
+EMAIL: Harrison.Cassar@gmail.com
+ID: 505114980
+
+Included Files:
+-lab3a.c:
+
+References:
+-man pages for debugfs
+-man pages for pread
+-documentation for EXT2 file system format
