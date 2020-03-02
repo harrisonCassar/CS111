@@ -12,17 +12,22 @@
 #include <stdlib.h>
 #include <unistd.h>
 #include <string.h>
+#include <time.h>
 #include "ext2_fs.h"
 
 //macros
 #define BOOT_SIZE 1024
 #define BLOCK_SIZE 1024
+#define EXT2_S_IFREG 0x8000
+#define EXT2_S_IFDIR 0x4000
+#define EXT2_S_IFLNK 0xA000
 
 //auxiliary functions
 char* getFilepathFromArguments(int argc, char** argv);
 int protected_pread(int fd, void* buf, size_t size, off_t offset);
 int protected_open(const char* filepath, int flags);
 void protected_close(int fd);
+void formatTime(char* buf, int size, time_t time);
 
 int main(int argc, char** argv)
 {
@@ -137,9 +142,300 @@ int main(int argc, char** argv)
 	/* INODE Summary:
 	Scan the I-nodes for each group. For each allocated (non-zero mode and non-zero link count) I-node, produce a new-line terminated line, with up to 27 comma-separated fields (with no white space). The first twelve fields are i-node attributes:	
 
+	INODE
+	inode number (decimal)
+	file type ('f' for file, 'd' for directory, 's' for symbolic link, '?" for anything else)
+	mode (low order 12-bits, octal ... suggested format "%o")
+	owner (decimal)
+	group (decimal)
+	link count (decimal)
+	time of last I-node change (mm/dd/yy hh:mm:ss, GMT) //NOTE: According to sanity test, ", GMT" should not be included in the output (confirmed by TA, despite the spec)
+	modification time (mm/dd/yy hh:mm:ss, GMT) //NOTE: According to sanity test, ", GMT" should not be included in the output (confirmed by TA, despite the spec)
+	time of last access (mm/dd/yy hh:mm:ss, GMT) //NOTE: According to sanity test, ", GMT" should not be included in the output (confirmed by TA, despite the spec)
+	file size (decimal)
+	number of (512 byte) blocks of disk space (decimal) taken up by this file
+	(next 15 are block addresses; decimal, 12 direct, one indirect, one double indirect, one triple indirect; if file length is less than the size of the block ptrs, 60 bytes, the file will contain zero data blocks, and the name is stored in the space normally occupied by the block ptrs; in this case, do not print out block ptrs)
+	
+	For directory entries, additionally:
+	For each directory I-node, scan every data block. For each valid (non-zero I-node number) directory entry, produce a new-line terminated line, with seven comma-separated fields (no white space).
+	
+	DIRENT
+	parent inode number (decimal) ... the I-node number of the directory that contains this entry
+	logical byte offset (decimal) of this entry within the directory
+	inode number of the referenced file (decimal)
+	entry length (decimal)
+	name length (decimal)
+	name (string, surrounded by single-quotes). Don't worry about escaping, we promise there will be no single-quotes or commas in any of the file names.
+	
+	For indirect block references, additionally:
+	For each file or directory I-node, scan the single indirect blocks and (recursively) the double and triple indirect blocks. For each non-zero block pointer you find, produce a new-line terminated line with six comma-separated fields (no white space).
+
+	INDIRECT
+	I-node number of the owning file (decimal)
+	(decimal) level of indirection for the block being scanned ... 1 for single indirect, 2 for double indirect, 3 for triple
+	logical block offset (decimal) represented by the referenced block. If the referenced block is a data block, this is the logical block offset of that block within the file. If the referenced block is a single- or double-indirect block, this is the same as the logical offset of the first data block to which it refers.
+	block number of the (1, 2, 3) indirect block being scanned (decimal) . . . not the highest level block (in the recursive scan), but the lower level block that contains the block reference reported by this entry.
+	block number of the referenced block (decimal)
 	*/
 
+	struct ext2_inode inode;
+	int inodetable_offset = gdt.bg_inode_table*BLOCK_SIZE;
+
+	for (unsigned int i = 0; i < sb.s_inodes_count; i++)
+	{
+		protected_pread(fs,&inode,sizeof(struct ext2_inode),inodetable_offset + i*sizeof(struct ext2_inode));
+
+		if (inode.i_mode != 0 && inode.i_links_count != 0)
+		{
+			//determine file type
+			char ftype = '?';
+			if (inode.i_mode & EXT2_S_IFREG)
+				ftype = 'f';
+			else if (inode.i_mode & EXT2_S_IFDIR)
+				ftype = 'd';
+			else if (inode.i_mode & EXT2_S_IFLNK)
+				ftype = 's';
+
+			//construct time outputs
+			char buf_inodeChange[25];
+			char buf_inodeModification[25];
+			char buf_inodeAccess[25];
+
+			formatTime(buf_inodeChange,25,(time_t) inode.i_ctime); //ctime --> inode change
+			formatTime(buf_inodeModification,25,(time_t) inode.i_mtime); //mtime --> modification time (of file)
+			formatTime(buf_inodeAccess,25,(time_t) inode.i_atime); //atime --> access
+
+			long filesize = (((long) inode.i_dir_acl) << 32) | ((long) inode.i_size);
+
+			fprintf(stdout,"INODE,%d,%c,%o,%d,%d,%d,%s,%s,%s,%ld,%d",i+1,ftype,inode.i_mode & 0x0FFF,inode.i_uid,inode.i_gid,inode.i_links_count,buf_inodeChange,buf_inodeModification,buf_inodeAccess,filesize,inode.i_blocks);
+			
+			//check if symbolic link and if no data blocks are occupied by file (size is less than block pointer size, meaning no more printing)
+			if (ftype == 's' && filesize < 60)
+				continue;
+
+			for (int j = 0; j < EXT2_N_BLOCKS; j++)
+				fprintf(stdout,",%d",inode.i_block[j]);
+
+			fprintf(stdout,"\n");
+
+			if (ftype == 'd')
+			{
+				struct ext2_dir_entry dirent;
+
+				long sumlogicaloffset = 0;
+
+				//direct blocks
+				for (int k = 0; k < EXT2_NDIR_BLOCKS; k++)
+				{	
+					if (inode.i_block[k] != 0)
+					{
+						for (int block_offset = 0; block_offset < BLOCK_SIZE; )	
+						{			
+							protected_pread(fs,&dirent,sizeof(struct ext2_dir_entry),inode.i_block[k] * BLOCK_SIZE + block_offset);
+
+							if (dirent.inode != 0)
+								fprintf(stdout,"DIRENT,%d,%ld,%d,%d,%d,\'%s\'\n",i+1,(long) k*BLOCK_SIZE+block_offset,dirent.inode,dirent.rec_len,dirent.name_len,dirent.name);
+						
+							block_offset += dirent.rec_len;
+						}
+					}
+				}
+
+				sumlogicaloffset += EXT2_NDIR_BLOCKS*BLOCK_SIZE;
+				
+				__u32 block_ptr_buf[BLOCK_SIZE];
+				__u32 indblock_ptr_buf[BLOCK_SIZE];
+				__u32 dindblock_ptr_buf[BLOCK_SIZE];
+
+				//indirect block
+				if (inode.i_block[EXT2_IND_BLOCK] != 0)
+				{
+					protected_pread(fs,block_ptr_buf,BLOCK_SIZE,inode.i_block[EXT2_IND_BLOCK] * BLOCK_SIZE);
+					
+					//iterate through block ptrs stored at ind block
+					for (int l = 0; l < BLOCK_SIZE/4; l++)
+					{
+						if (block_ptr_buf[l] != 0)
+						{
+							for (int block_offset = 0; block_offset < BLOCK_SIZE; )	
+							{			
+								protected_pread(fs,&dirent,sizeof(struct ext2_dir_entry),block_ptr_buf[l] * BLOCK_SIZE + block_offset);
+
+								if (dirent.inode != 0)
+									fprintf(stdout,"DIRENT,%d,%ld,%d,%d,%d,\'%s\'\n",i+1,(long) l*BLOCK_SIZE + sumlogicaloffset + block_offset,dirent.inode,dirent.rec_len,dirent.name_len,dirent.name);
+							
+								block_offset += dirent.rec_len;
+							}
+						}
+					}
+				}
+
+				sumlogicaloffset += 1 * (BLOCK_SIZE/4) * BLOCK_SIZE; 
+
+				//double indirect block
+				if (inode.i_block[EXT2_DIND_BLOCK] != 0)
+				{
+					protected_pread(fs,indblock_ptr_buf,BLOCK_SIZE,inode.i_block[EXT2_DIND_BLOCK] * BLOCK_SIZE);
+					
+					//iterate through indblock ptrs stored at dind block
+					for (int m = 0; m < BLOCK_SIZE/4; m++)
+					{
+						if (indblock_ptr_buf[m] != 0)
+						{
+							protected_pread(fs,block_ptr_buf,BLOCK_SIZE,indblock_ptr_buf[m] * BLOCK_SIZE);
+							
+							//iterate through block ptrs stored at ind block
+							for (int n = 0; n < BLOCK_SIZE/4; n++)
+							{
+								if (block_ptr_buf[n] != 0)
+								{
+									for (int block_offset = 0; block_offset < BLOCK_SIZE; )	
+									{			
+										protected_pread(fs,&dirent,sizeof(struct ext2_dir_entry),block_ptr_buf[n] * BLOCK_SIZE + block_offset);
+
+										if (dirent.inode != 0)
+											fprintf(stdout,"DIRENT,%d,%ld,%d,%d,%d,\'%s\'\n",i+1,(long) n*BLOCK_SIZE + sumlogicaloffset + m*(BLOCK_SIZE/4)*BLOCK_SIZE + block_offset,dirent.inode,dirent.rec_len,dirent.name_len,dirent.name);
+									
+										block_offset += dirent.rec_len;
+									}
+								}
+							}
+						}
+					}
+				}
+
+				sumlogicaloffset += 1 * (BLOCK_SIZE/4) * (BLOCK_SIZE/4) * BLOCK_SIZE;
+
+				//triple indirect block
+				if (inode.i_block[EXT2_TIND_BLOCK] != 0)
+				{
+					protected_pread(fs,dindblock_ptr_buf,BLOCK_SIZE,inode.i_block[EXT2_TIND_BLOCK] * BLOCK_SIZE);
+					
+					//iterate through dindblock ptrs stored at tind block
+					for (int p = 0; p < BLOCK_SIZE/4; p++)
+					{
+						if (dindblock_ptr_buf[p] != 0)
+						{
+							protected_pread(fs,indblock_ptr_buf,BLOCK_SIZE,dindblock_ptr_buf[p] * BLOCK_SIZE);
+							
+							//iterate through indblock ptrs stored at dind block
+							for (int q = 0; q < BLOCK_SIZE/4; q++)
+							{
+								if (indblock_ptr_buf[q] != 0)
+								{
+									protected_pread(fs,block_ptr_buf,BLOCK_SIZE,indblock_ptr_buf[q] * BLOCK_SIZE);
+									
+									//iterate through block ptrs stored at ind block
+									for (int r = 0; r < BLOCK_SIZE/4; r++)
+									{
+										if (block_ptr_buf[r] != 0)
+										{
+											for (int block_offset = 0; block_offset < BLOCK_SIZE; )	
+											{			
+												protected_pread(fs,&dirent,sizeof(struct ext2_dir_entry),block_ptr_buf[r] * BLOCK_SIZE + block_offset);
+
+												if (dirent.inode != 0)
+													fprintf(stdout,"DIRENT,%d,%ld,%d,%d,%d,\'%s\'\n",i+1,(long) r*BLOCK_SIZE + sumlogicaloffset + q*(BLOCK_SIZE/4)*BLOCK_SIZE + p*(BLOCK_SIZE/4)*(BLOCK_SIZE/4)*BLOCK_SIZE + block_offset,dirent.inode,dirent.rec_len,dirent.name_len,dirent.name);
+											
+												block_offset += dirent.rec_len;
+											}
+										}
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+
+			if (ftype == 'd' || ftype == 'f')
+			{
+				__u32 block_ptr_buf[BLOCK_SIZE];
+				__u32 indblock_ptr_buf[BLOCK_SIZE];
+				__u32 dindblock_ptr_buf[BLOCK_SIZE];
+
+				//indirect block
+				if (inode.i_block[EXT2_IND_BLOCK] != 0)
+				{
+					protected_pread(fs,block_ptr_buf,BLOCK_SIZE,inode.i_block[EXT2_IND_BLOCK] * BLOCK_SIZE);
+					
+					//iterate through block ptrs stored at ind block
+					for (int t = 0; t < BLOCK_SIZE/4; t++)
+					{
+						if (block_ptr_buf[t] > 0)
+							fprintf(stdout,"INDIRECT,%d,1,%ld,%d,%d\n",i+1,(long) EXT2_NDIR_BLOCKS+t,inode.i_block[EXT2_IND_BLOCK],block_ptr_buf[t]);
+					}
+				}
+
+				//double indirect block
+				if (inode.i_block[EXT2_DIND_BLOCK] != 0)
+				{
+					protected_pread(fs,indblock_ptr_buf,BLOCK_SIZE,inode.i_block[EXT2_DIND_BLOCK] * BLOCK_SIZE);
+					
+					//iterate through indblock ptrs stored at dind block
+					for (int m = 0; m < BLOCK_SIZE/4; m++)
+					{
+						if (indblock_ptr_buf[m] > 0)
+						{
+							fprintf(stdout,"INDIRECT,%d,2,%ld,%d,%d\n",i+1,(long) EXT2_NDIR_BLOCKS+(m+1)*(BLOCK_SIZE/4),inode.i_block[EXT2_DIND_BLOCK],indblock_ptr_buf[m]);
+
+							protected_pread(fs,block_ptr_buf,BLOCK_SIZE,indblock_ptr_buf[m] * BLOCK_SIZE);
+							
+							//iterate through block ptrs stored at ind block
+							for (int t = 0; t < BLOCK_SIZE/4; t++)
+							{
+								if (block_ptr_buf[t] > 0)
+									fprintf(stdout,"INDIRECT,%d,1,%ld,%d,%d\n",i+1,(long) EXT2_NDIR_BLOCKS+(m+1)*(BLOCK_SIZE/4) + t,indblock_ptr_buf[m],block_ptr_buf[t]);
+							}
+						}
+					}
+				}
+
+				//triple indirect block
+				if (inode.i_block[EXT2_TIND_BLOCK] != 0)
+				{
+					protected_pread(fs,dindblock_ptr_buf,BLOCK_SIZE,inode.i_block[EXT2_TIND_BLOCK] * BLOCK_SIZE);
+					
+					//iterate through dindblock ptrs stored at tind block
+					for (int p = 0; p < BLOCK_SIZE/4; p++)
+					{
+						if (dindblock_ptr_buf[p] > 0)
+						{
+							fprintf(stdout,"INDIRECT,%d,3,%ld,%d,%d\n",i+1,(long) EXT2_NDIR_BLOCKS+(p+1)*(BLOCK_SIZE/4)*(BLOCK_SIZE/4) + BLOCK_SIZE/4,inode.i_block[EXT2_TIND_BLOCK],dindblock_ptr_buf[p]);
+
+							protected_pread(fs,indblock_ptr_buf,BLOCK_SIZE,dindblock_ptr_buf[p] * BLOCK_SIZE);
+							
+							//iterate through indblock ptrs stored at dind block
+							for (int q = 0; q < BLOCK_SIZE/4; q++)
+							{
+								if (indblock_ptr_buf[q] > 0)
+								{
+									fprintf(stdout,"INDIRECT,%d,2,%ld,%d,%d\n",i+1,(long) EXT2_NDIR_BLOCKS+(p+1)*(BLOCK_SIZE/4)*(BLOCK_SIZE/4) + (q+1)*BLOCK_SIZE/4,dindblock_ptr_buf[p],indblock_ptr_buf[q]);
+
+									protected_pread(fs,block_ptr_buf,BLOCK_SIZE,indblock_ptr_buf[q] * BLOCK_SIZE);
+									
+									//iterate through block ptrs stored at ind block
+									for (int t = 0; t < BLOCK_SIZE/4; t++)
+									{
+										if (block_ptr_buf[t] > 0)
+											fprintf(stdout,"INDIRECT,%d,1,%ld,%d,%d\n",i+1,(long) EXT2_NDIR_BLOCKS+(p+1)*(BLOCK_SIZE/4)*(BLOCK_SIZE/4) + (q+1)*BLOCK_SIZE/4 + t,indblock_ptr_buf[q],block_ptr_buf[t]);
+									}
+								}
+							}
+						}
+					}
+				}
+			}
+		}
+	}
+
 	exit(0);
+}
+
+void formatTime(char* buf, int size, time_t time)
+{
+	struct tm* tmp = gmtime(&time);
+	strftime(buf,size,"%D %T", tmp);
 }
 
 char* getFilepathFromArguments(int argc, char** argv)
