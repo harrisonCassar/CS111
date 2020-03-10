@@ -106,8 +106,6 @@ for i in range(11,sb.inodes_count+1): #allocated_inodes
 	onFreeList = bool(i in free_inodes_nums)
 	isAllocated = bool(contains(allocated_inodes,i))
 
-	print ("audit: checking " + str(i) + ", where onFreeList = " + str(onFreeList) + " and isAllocated = " + str(isAllocated))
-
 	if onFreeList and isAllocated:
 		print("ALLOCATED INODE " + str(i) + " ON FREELIST")
 	elif (not onFreeList) and (not isAllocated):
