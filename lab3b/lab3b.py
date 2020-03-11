@@ -46,7 +46,7 @@ class Inode:
 		self.inode_access_time = report[9]
 		self.file_size = int(report[10])
 		self.num_of_blocks = int(report[11])
-		self.list = [int(report[12]),int(report[13]),int(report[14]),int(report[15]),int(report[16]),int(report[17]),int(report[18]),int(report[19]),int(report[20]),int(report[21]),int(report[22]),int(report[23])] #add in a buffer for the 12 direct block ptrs
+		self.dir_ptrs = [int(report[12]),int(report[13]),int(report[14]),int(report[15]),int(report[16]),int(report[17]),int(report[18]),int(report[19]),int(report[20]),int(report[21]),int(report[22]),int(report[23])] #add in a buffer for the 12 direct block ptrs
 		self.ind_ptr = int(report[24])
 		self.dind_ptr = int(report[25])
 		self.tind_ptr = int(report[26])
@@ -112,5 +112,45 @@ for i in range(11,sb.inodes_count+1): #allocated_inodes
 		print("UNALLOCATED INODE " + str(i) + " NOT ON FREELIST")
 
 #block consistency audits
+min_block_num = gdt.inode_table + (sb.num_inodes_in_group*sb.inode_size/sb.block_size)
+max_block_num = sb.blocks_count
 
-#inode allocation audits
+for i in range(0,len(allocated_inodes)):
+	inode = allocated_inodes[i]
+	
+	#check direct blocks
+	for j in range(0,len(inode.dir_ptrs)):
+		dir_ptr = inode.dir_ptrs[j]
+		if (dir_ptr < 0 or dir_ptr > max_block_num):
+			print("INVALID BLOCK " + str(dir_ptr) + " IN INODE " + str(inode.inode_num) + " AT OFFSET " + str(j))
+		elif (dir_ptr != 0 and dir_ptr < min_block_num):
+			print("RESERVED BLOCK " + str(dir_ptr) + " IN INODE " + str(inode.inode_num) + " AT OFFSET " + str(j))
+		else:
+			#add to referenced list/dictionary, checking if duplicate; output if so (key is block num, value is list of two items: block inode #, offset value)
+	
+	#check indirect block, and its respective direct block ptrs
+	if (ind_ptr < 0 or ind_ptr > max_block_num):
+		print("INVALID INDIRECT BLOCK" + str(ind_ptr) + " IN INODE " + str(inode.inode_num) + " AT OFFSET " + str(len(inode.dir_ptrs)))
+	elif (ind_ptr != 0 and ind_ptr < min_block_num):
+		print("RESERVED INDIRECT BLOCK " + str(ind_ptr) + " IN INODE " + str(inode.inode_num) + " AT OFFSET " + str(len(inode.dir_ptrs)))
+
+	#for k in range(0,sb.block_size/4): 
+
+	#check double indirect block, its respective single indirect blocks, and their respective direct block ptrs
+	if (dind_ptr < min_block_num or dind_ptr > max_block_num):
+		print("INVALID DOUBLE INDIRECT BLOCK" + str(dind_ptr) + " IN INODE " + str(inode.inode_num) + " AT OFFSET " + str(len(inode.dir_ptrs) + sb.block_size/4))
+	elif (dind_ptr != 0 and dind_ptr < min_block_num):
+		print("RESERVED DOUBLE INDIRECT BLOCK " + str(dind_ptr) + " IN INODE " + str(inode.inode_num) + " AT OFFSET " + str(len(inode.dir_ptrs) + sb.block_size/4))
+
+	#for dsada
+
+	#check triple indirect block, its respective double indirect blocks, their respective single indirect blocks, and their respective direct blocks
+	if (tind_ptr < min_block_num or tind_ptr > max_block_num):
+		print("INVALID TRIPLE INDIRECT BLOCK" + str(tind_ptr) + " IN INODE " + str(inode.inode_num) + " AT OFFSET " + str(len(inode.dir_ptrs) + ((sb.block_size/4)+1)*(sb.block_size/4)))
+	elif (tind_ptr != 0 and tind_ptr < min_block_num):
+		print("RESERVED TRIPLE INDIRECT BLOCK " + str(tind_ptr) + " IN INODE " + str(inode.inode_num) + " AT OFFSET " + str(len(inode.dir_ptrs) + ((sb.block_size/4)+1)*(sb.block_size/4)))
+
+	#for doakjdoas
+
+#directory consistency audits
+
