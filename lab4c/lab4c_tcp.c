@@ -16,23 +16,52 @@
 #include <sys/types.h>
 #include <sys/stat.h>
 #include <fcntl.h>
+#include <sys/types.h>
+#include <sys/socket.h>
+#include <netdb.h>
+#include <time.h>
+#include <errno.h>
+#include <string.h>
+#include <strings.h>
 
 //pin mappings
 #define PIN_temperature 1
+#define TCP_SERVER_PORT 18000
+#define ID_SIZE 9
+#define BUFSIZE 256
 
 //auxiliary functions
 void parseOptions(int argc, char** argv);
+void prepareExit();
+int protected_poll(struct pollfd *fds, nfds_t nfds, int timeout);
+int protected_open(const char* filepath, int flags, mode_t mode);
+void protected_close(int fd);
+int protected_read(int fd, char* buf, size_t size);
+int protected_write(int fd, const char* buf, size_t size);
+int protected_socket(int socket_family, int socket_type, int protocol);
+void handleSocketInput();
+void logOutput(const char* buf);
 
 //globals
+const char TCP_SERVER_HOST[] = "lever.cs.ucla.edu";
+
 double pollPeriod = 1; //Seconds
 char tempScale = 'f'; //Fahrenheit = f, Celsius = c
-char* id = NULL;
+char id[ID_SIZE+1];
 char* host = NULL;
 char* logfile = NULL;
 int fd_logfile = 1;
-int port = -1;
+int socketfd;
+int port = TCP_SERVER_PORT;
+
+int FL_quitReady = 0;
+int FL_run = 1;
+int FL_stopped = 0;
+
 mraa_aio_context temperature_aio = NULL;
 mraa_result_t status = MRAA_SUCCESS;
+char commandbuf[BUFSIZE] = "";
+int curindex = 0;
 
 struct option long_options[] =
 {
@@ -52,7 +81,172 @@ int main(int argc, char** argv)
     //open specified logfile
     fd_logfile = protected_open(logfile,O_TRUNC|O_CREAT|O_WRONLY,00777);
 
+	//mraa_init();
 
+	atexit(prepareExit);
+
+	//initializes connection to temperature sensor (AIO)
+	temperature_aio = mraa_aio_init(PIN_temperature);
+    if (temperature_aio == NULL)
+    {
+    	fprintf(stderr, "Failed to initialize AIO %d for temperature sensor.\n", PIN_temperature);
+    	exit(1);
+    }
+
+	//setup connection to server
+	socketfd = protected_socket(AF_INET,SOCK_STREAM, 0);
+
+	struct hostent* tmp = gethostbyname(TCP_SERVER_HOST);
+	if (tmp == NULL)
+	{
+		//error, check h_errno
+		fprintf(stderr,"Error when calling gethostbyname().\r\n");
+		exit(1);
+	}
+
+	struct sockaddr_in addr;
+	memcpy(&addr.sin_addr,tmp->h_addr_list[0],tmp->h_length);
+	addr.sin_family = AF_INET;
+	addr.sin_port = htons(port);
+	bzero(&addr.sin_addr.s_addr,sizeof(addr.sin_addr.s_addr)); 
+
+	if (connect(socketfd, (struct sockaddr *) &addr,sizeof(addr)) == -1)
+	{
+		//error, check errno
+		fprintf(stderr,"Error when attempting to connect client to server: %s\r\n", strerror(errno));
+
+		exit(1);
+	}
+
+	/* Connection successful to host. */
+
+	//send (and log) an ID terminated with a newline
+	id[ID_SIZE] = '\n';
+	protected_write(socketfd,id,ID_SIZE);
+	protected_write(fd_logfile,id,ID_SIZE);
+
+	//send (and log) newline-terminated temperature reports over socket
+	//process (and log) newline-terminated commands received over the connection
+	
+	//init data structures for input handling section of code
+    int ret;
+    time_t currenttime;
+    time_t lasttime;
+    struct tm* current;
+    char outputbuf[BUFSIZE];
+
+    time(&lasttime);
+    lasttime = currenttime;
+
+	struct pollfd infds[1];
+	infds[0].fd = socketfd;
+	infds[0].events = POLLIN | POLLHUP | POLLERR;
+
+	//continuously poll for input from socket and temperature sensor (until socket sends OFF signal)
+    while (FL_run)
+    {
+    	if (!FL_stopped)
+    	{
+	    	//sample temperature sensor if pollPeriod has elapsed
+	   		time(&currenttime);
+			
+			if (difftime(currenttime,lasttime) >= pollPeriod)
+			{
+				lasttime = currenttime;
+				current = localtime(&currenttime);
+
+				//read from temperature sensor
+				int raw_temperature = mraa_aio_read(temperature_aio);
+				if (raw_temperature == -1)
+				{
+					fprintf(stderr, "Failed to read from temperature sensor.\n");
+					exit(1);
+				}
+
+				//converts temperature reading into a temperature (scale controlled with --scale)
+				float R = 1023.0/((double)raw_temperature) - 1.0;
+			    R *= 100000.0;
+
+			    float temperature = 1.0/(log(R/100000.0)/4275 + 1/298.15) - 273.15; // convert to temperature via datasheet
+
+				if (tempScale == 'f')
+					temperature = temperature*(9/5) + 32;
+
+				//log timestamp and processed temperature reading
+				char hour[3] = "";
+				char min[3] = "";
+				char sec[3] = "";
+
+				if (current->tm_hour < 10)
+					sprintf(hour,"0%d",current->tm_hour);
+				else
+					sprintf(hour,"%d",current->tm_hour);
+				
+				if (current->tm_min < 10)
+					sprintf(min,"0%d",current->tm_min);
+				else
+					sprintf(min,"%d",current->tm_min);
+				
+				if (current->tm_sec < 10)
+					sprintf(sec,"0%d",current->tm_sec);
+				else
+					sprintf(sec,"%d",current->tm_sec);
+
+				sprintf(outputbuf,"%s:%s:%s %.1f\n", hour, min, sec, temperature);
+				protected_write(socketfd,outputbuf,strlen(outputbuf));
+
+				logOutput(outputbuf);
+			}
+		}
+		
+		//check and read available data from socket
+		ret = protected_poll(infds,(unsigned long) 1, 0);
+		
+		if (ret > 0)
+		{
+			//check for POLLIN events
+			if ((infds[0].revents & POLLIN) == POLLIN)
+				handleSocketInput(); //process input from terminal
+
+        	//check for POLLHUP or POLLERR events
+			if ((infds[0].revents & (POLLHUP | POLLERR)))
+			{
+				fprintf(stderr, "POLLHUP or POLLERR detected on socket input stream.\n");
+				break;
+			}
+		}
+    }
+
+    //exited loop means SHUTDOWN is detected (from socket)
+    //record time
+	time(&currenttime);
+	current = localtime(&currenttime);
+	
+	//write SHUTDOWN report to and append to logfile
+	char hour[3] = "";
+	char min[3] = "";
+	char sec[3] = "";
+
+	if (current->tm_hour < 10)
+		sprintf(hour,"0%d",current->tm_hour);
+	else
+		sprintf(hour,"%d",current->tm_hour);
+	
+	if (current->tm_min < 10)
+		sprintf(min,"0%d",current->tm_min);
+	else
+		sprintf(min,"%d",current->tm_min);
+	
+	if (current->tm_sec < 10)
+		sprintf(sec,"0%d",current->tm_sec);
+	else
+		sprintf(sec,"%d",current->tm_sec);
+
+	sprintf(outputbuf,"%s:%s:%s SHUTDOWN\n", hour, min, sec);
+
+	logOutput(outputbuf);
+	
+	exit(0);
 }
 
 void parseOptions(int argc, char** argv)
@@ -89,20 +283,21 @@ void parseOptions(int argc, char** argv)
                 break;
             case 'i':
                 FL_id = 1;
-                id = optarg;
-                if (strlen(id) != 9)
+                if (strlen(optarg) != ID_SIZE)
                 {
                     fprintf(stderr, "Specified ID is not a 9-digit number.\n");
 				    exit(1);
                 }
 
-                for (int i = 0; i < 9; i++)
+                for (int i = 0; i < ID_SIZE; i++)
                 {
-                    if (!isdigit(id[i]))
+                    if (!isdigit(optarg[i]))
                     {
                         fprintf(stderr, "Specified ID must contain only valid numerical digits: 0 to 9.");
 				        exit(1);
                     }
+
+					id[i] = optarg[i];
                 }
                 break;
             case 'h':
@@ -155,7 +350,7 @@ void parseOptions(int argc, char** argv)
     //check for argument errors
     if (!FL_id || !FL_host || !FL_log || !FL_port)
     {
-        fprintf(stderr,"Did not pass in all of the mandatory arguments.\n\nusage: %s --id=9-digit-# --host=name-or-address --log=filename port [--period=#] [--scale=[FC]]\n\t--id: specifies the id number to associate with the client during connection to the server\n\t--host: specifies the host name or address of the server to connect to\n\t--log: log all inputted commands and reading reports to the specified logfile.\n\tport: specifies server's port to connect to\n\t--period: specifies the time interval in-between temperature sensor readings.\n\t--scale: specifies temperature reading scale (F for Fahrenheit [default], C for Celsius).\n\n");
+        fprintf(stderr,"Did not pass in all of the mandatory arguments.\n\nusage: %s --id=9-digit-# --host=name-or-address --log=filename port [--period=#] [--scale=[FC]]\n\t--id: specifies the id number to associate with the client during connection to the server\n\t--host: specifies the host name or address of the server to connect to\n\t--log: log all inputted commands and reading reports to the specified logfile.\n\tport: specifies server's port to connect to\n\t--period: specifies the time interval in-between temperature sensor readings.\n\t--scale: specifies temperature reading scale (F for Fahrenheit [default], C for Celsius).\n\n", argv[0]);
 		exit(1);
     }
 
@@ -174,7 +369,7 @@ void parseOptions(int argc, char** argv)
 	//check if extra unexpected arguments were specified beyond 1 for the port (not supported)
 	if ((argc-1)-optind != 0)
 	{
-		fprintf(stderr, "Extra unexpected option not recognized.\nusage: %s [--period=#] [--scale=[FC]] [--log=filepath]\n\t--period: specifies the time interval in-between temperature sensor readings.\n\t--scale: specifies temperature reading scale (F for Fahrenheit [default], C for Celsius).\n\t--log: log all inputted commands and reading reports to the specified logfile.\n\n", argv[optind-1], argv[0]);
+		fprintf(stderr, "Extra unexpected option not recognized.\nusage: %s --id=9-digit-# --host=name-or-address --log=filename port [--period=#] [--scale=[FC]]\n\t--id: specifies the id number to associate with the client during connection to the server\n\t--host: specifies the host name or address of the server to connect to\n\t--log: log all inputted commands and reading reports to the specified logfile.\n\tport: specifies server's port to connect to\n\t--period: specifies the time interval in-between temperature sensor readings.\n\t--scale: specifies temperature reading scale (F for Fahrenheit [default], C for Celsius).\n\n", argv[0]);
 		exit(1);
 	}
 }
@@ -371,6 +566,103 @@ int protected_write(int fd, const char* buf, size_t size)
 	}
 
 	return bytesWritten;
+}
+
+int protected_socket(int socket_family, int socket_type, int protocol)
+{
+	int ret = socket(socket_family,socket_type,protocol);
+	if (ret == -1)
+	{
+		fprintf(stderr,"Error: %s; ", strerror(errno));
+        switch (errno)
+        {
+        	case EACCES:
+            	fprintf(stderr,"Attempted creation of socket failed because permission to create socket of specified type and/or protocol is denied.\r\n");
+            	break;
+            case EAFNOSUPPORT:
+            	fprintf(stderr,"Attempted creation of socket failed because the implementation does not support the specified address family.\r\n");
+                break;
+            case EINVAL:
+            	fprintf(stderr,"Attempted creation of socket failed because unknown protocol, or protocol family not avaiable, or invalid flags in type.\r\n");
+            	break;
+            case EMFILE:
+            	fprintf(stderr,"Attempted creation of socket failed because the per-process limit on the number of open file descriptors has been reached.\r\n");
+        		break;
+        	case ENFILE:
+        		fprintf(stderr,"Attempted creation of socket failed because the system-wide limit on the total number of open files has been reached.\r\n");
+        		break;
+        	case ENOBUFS:
+        	case ENOMEM:
+        		fprintf(stderr,"Attempted creation of socket failed because insufficient memory is avaiable. The socket cannot be created until sufficient resources are freed.\r\n");
+        		break;
+        	case EPROTONOSUPPORT:
+        		fprintf(stderr,"Attempted creation of socket failed because the protocol type or the specified portocol is not supported within this domain.\r\n");
+        		break;
+            default:
+            	fprintf(stderr,"Attempted creation of socket failed with an unrecognized error.\r\n");
+            	break;
+        }
+		
+		exit(1);
+	}
+
+	return ret;
+}
+
+void handleSocketInput()
+{
+	int bytesRead;
+
+	char buf[BUFSIZE];	
+
+	//read bytes from socket input
+	bytesRead = protected_read(socketfd,buf,BUFSIZE);	
+
+	//handle read bytes
+	int i;
+	for (i = 0; i < bytesRead; i++)
+	{
+		if (buf[i] != '\n')
+		{
+			commandbuf[curindex] = buf[i];
+			curindex++;
+		}
+		else
+		{
+			commandbuf[curindex] = '\0';
+			curindex = 0;
+
+			if (strcmp(commandbuf,"OFF") == 0)
+			{
+				FL_run = 0;
+
+				logOutput(commandbuf);
+
+				break;
+			}
+			else if (strncmp(commandbuf,"SCALE=",6) == 0)
+			{
+				if (strcmp(commandbuf+6,"F") == 0)
+					tempScale = 'f';
+				else if (strcmp(commandbuf+6,"C") == 0)
+					tempScale = 'c';
+			}
+			else if (strcmp(commandbuf,"STOP") == 0)
+				FL_stopped = 1;
+			else if (strcmp(commandbuf,"START") == 0)
+				FL_stopped = 0;
+			else if (strncmp(commandbuf,"PERIOD=",7) == 0)
+			{
+				double newPeriod = strtod(commandbuf+7,NULL);
+				if (newPeriod > 0 || (newPeriod == 0 && strcmp(commandbuf+7,"0") == 0))
+					pollPeriod = newPeriod;
+			}
+
+			//log all commands (regardless of validity) after processed
+			strcat(commandbuf,"\n");
+			logOutput(commandbuf);
+		}
+	}
 }
 
 void logOutput(const char* buf)
