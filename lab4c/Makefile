@@ -9,8 +9,9 @@ CC = gcc
 # -g    adds debugging information to the executable file
 # -Wall turns on most, but not all, compiler warnings
 # -Wextra enables some extra warning flags not enabled by -Wall
+# -lmraa links the mraa library, -lm links the math library
 CFLAGS = -Wall -Wextra -g
-CLIBRARIES = -lmraa #-lm
+CLIBRARIES = -lmraa -lm
 
 # default build
 default:

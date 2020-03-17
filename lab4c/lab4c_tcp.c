@@ -23,6 +23,7 @@
 #include <errno.h>
 #include <string.h>
 #include <strings.h>
+#include <math.h>
 
 //pin mappings
 #define PIN_temperature 1
@@ -43,15 +44,16 @@ void handleSocketInput();
 void logOutput(const char* buf);
 
 //globals
-const char TCP_SERVER_HOST[] = "lever.cs.ucla.edu";
+//const char TCP_SERVER_HOST[] = "lever.cs.ucla.edu";
 
 double pollPeriod = 1; //Seconds
 char tempScale = 'f'; //Fahrenheit = f, Celsius = c
 char id[ID_SIZE+1];
+char buf[50];
 char* host = NULL;
 char* logfile = NULL;
 int fd_logfile = 1;
-int socketfd;
+int socketfd = 0;
 int port = TCP_SERVER_PORT;
 
 int FL_quitReady = 0;
@@ -96,24 +98,31 @@ int main(int argc, char** argv)
 	//setup connection to server
 	socketfd = protected_socket(AF_INET,SOCK_STREAM, 0);
 
-	struct hostent* tmp = gethostbyname(TCP_SERVER_HOST);
+	struct hostent* tmp = gethostbyname(host);
+
+	printf("%s\n",host);
+	printf("Host name : %s \n", (*tmp).h_name);
+
 	if (tmp == NULL)
 	{
 		//error, check h_errno
-		fprintf(stderr,"Error when calling gethostbyname().\r\n");
+		fprintf(stderr,"Error when finding the host.\n");
 		exit(1);
 	}
 
 	struct sockaddr_in addr;
+	//bcopy((char*)tmp->h_addr,(char*)&addr.sin_addr.s_addr,tmp->h_length);
 	memcpy(&addr.sin_addr,tmp->h_addr_list[0],tmp->h_length);
 	addr.sin_family = AF_INET;
 	addr.sin_port = htons(port);
 	bzero(&addr.sin_addr.s_addr,sizeof(addr.sin_addr.s_addr)); 
 
+	printf("socketfd: %d",socketfd);
+
 	if (connect(socketfd, (struct sockaddr *) &addr,sizeof(addr)) == -1)
 	{
 		//error, check errno
-		fprintf(stderr,"Error when attempting to connect client to server: %s\r\n", strerror(errno));
+		fprintf(stderr,"Error when attempting to connect client to server: %s\n", strerror(errno));
 
 		exit(1);
 	}
@@ -121,9 +130,10 @@ int main(int argc, char** argv)
 	/* Connection successful to host. */
 
 	//send (and log) an ID terminated with a newline
-	id[ID_SIZE] = '\n';
-	protected_write(socketfd,id,ID_SIZE);
-	protected_write(fd_logfile,id,ID_SIZE);
+	id[ID_SIZE] = '\0';
+	sprintf(buf,"ID=%s\n",id);
+	protected_write(socketfd,buf,ID_SIZE+4);
+	protected_write(fd_logfile,buf,ID_SIZE+4);
 
 	//send (and log) newline-terminated temperature reports over socket
 	//process (and log) newline-terminated commands received over the connection
@@ -165,9 +175,9 @@ int main(int argc, char** argv)
 
 				//converts temperature reading into a temperature (scale controlled with --scale)
 				float R = 1023.0/((double)raw_temperature) - 1.0;
-			    R *= 100000.0;
+			    R *= 100000;
 
-			    float temperature = 1.0/(log(R/100000.0)/4275 + 1/298.15) - 273.15; // convert to temperature via datasheet
+			    float temperature = 1.0/(log(R/100000)/4275 + 1/298.15) - 273.15; // convert to temperature via datasheet
 
 				if (tempScale == 'f')
 					temperature = temperature*(9/5) + 32;
@@ -289,7 +299,8 @@ void parseOptions(int argc, char** argv)
 				    exit(1);
                 }
 
-                for (int i = 0; i < ID_SIZE; i++)
+				int i = 0;
+                for (; i < ID_SIZE; i++)
                 {
                     if (!isdigit(optarg[i]))
                     {
