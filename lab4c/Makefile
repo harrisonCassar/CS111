@@ -12,10 +12,12 @@ CC = gcc
 # -lmraa links the mraa library, -lm links the math library
 CFLAGS = -Wall -Wextra -g
 CLIBRARIES = -lmraa -lm
+SSLLIBRARIES = -lssl -lcrypto
 
 # default build
 default:
 	$(CC) $(CFLAGS) $(CLIBRARIES) -o lab4c_tcp lab4c_tcp.c 
+	$(CC) $(CFLAGS) $(CLIBRARIES) $(SSLLIBRARIES) -o lab4c_tls lab4c_tls.c
 
 # build the distribution tarball
 dist:
@@ -25,4 +27,4 @@ dist:
 clean:
 	rm -f *~ *.tar.gz lab4c_tcp lab4c_tls
 
-.PHONY: clean dist
+.PHONY: clean dist default

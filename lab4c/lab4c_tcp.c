@@ -48,7 +48,7 @@ void logOutput(const char* buf);
 
 double pollPeriod = 1; //Seconds
 char tempScale = 'f'; //Fahrenheit = f, Celsius = c
-char id[ID_SIZE+1];
+char* id;
 char buf[50];
 char* host = NULL;
 char* logfile = NULL;
@@ -60,7 +60,7 @@ int FL_quitReady = 0;
 int FL_run = 1;
 int FL_stopped = 0;
 
-mraa_aio_context temperature_aio = NULL;
+mraa_aio_context temperature_aio;
 mraa_result_t status = MRAA_SUCCESS;
 char commandbuf[BUFSIZE] = "";
 int curindex = 0;
@@ -92,17 +92,13 @@ int main(int argc, char** argv)
     if (temperature_aio == NULL)
     {
     	fprintf(stderr, "Failed to initialize AIO %d for temperature sensor.\n", PIN_temperature);
-    	exit(1);
+    	exit(2);
     }
 
 	//setup connection to server
 	socketfd = protected_socket(AF_INET,SOCK_STREAM, 0);
 
 	struct hostent* tmp = gethostbyname(host);
-
-	printf("%s\n",host);
-	printf("Host name : %s \n", (*tmp).h_name);
-
 	if (tmp == NULL)
 	{
 		//error, check h_errno
@@ -111,20 +107,17 @@ int main(int argc, char** argv)
 	}
 
 	struct sockaddr_in addr;
-	//bcopy((char*)tmp->h_addr,(char*)&addr.sin_addr.s_addr,tmp->h_length);
-	memcpy(&addr.sin_addr,tmp->h_addr_list[0],tmp->h_length);
+	
 	addr.sin_family = AF_INET;
+	bcopy((char*)tmp->h_addr,(char*)&addr.sin_addr.s_addr,tmp->h_length);
 	addr.sin_port = htons(port);
-	bzero(&addr.sin_addr.s_addr,sizeof(addr.sin_addr.s_addr)); 
 
-	printf("socketfd: %d",socketfd);
-
-	if (connect(socketfd, (struct sockaddr *) &addr,sizeof(addr)) == -1)
+	if (connect(socketfd, (struct sockaddr*) &addr,sizeof(addr)) == -1)
 	{
 		//error, check errno
 		fprintf(stderr,"Error when attempting to connect client to server: %s\n", strerror(errno));
 
-		exit(1);
+		exit(2);
 	}
 
 	/* Connection successful to host. */
@@ -170,17 +163,17 @@ int main(int argc, char** argv)
 				if (raw_temperature == -1)
 				{
 					fprintf(stderr, "Failed to read from temperature sensor.\n");
-					exit(1);
+					exit(2);
 				}
 
 				//converts temperature reading into a temperature (scale controlled with --scale)
-				float R = 1023.0/((double)raw_temperature) - 1.0;
-			    R *= 100000;
+				double temp = 1023.0/((double)raw_temperature) - 1.0;
+			    temp *= 100000.0;
 
-			    float temperature = 1.0/(log(R/100000)/4275 + 1/298.15) - 273.15; // convert to temperature via datasheet
+			    double temperature = 1.0 / (log(temp/100000.0)/4275 + 1/298.15) - 273.15; // convert to temperature via datasheet
 
 				if (tempScale == 'f')
-					temperature = temperature*(9/5) + 32;
+					temperature = temperature * 9/5 + 32;
 
 				//log timestamp and processed temperature reading
 				char hour[3] = "";
@@ -299,6 +292,8 @@ void parseOptions(int argc, char** argv)
 				    exit(1);
                 }
 
+				id = optarg;
+
 				int i = 0;
                 for (; i < ID_SIZE; i++)
                 {
@@ -307,8 +302,6 @@ void parseOptions(int argc, char** argv)
                         fprintf(stderr, "Specified ID must contain only valid numerical digits: 0 to 9.");
 				        exit(1);
                     }
-
-					id[i] = optarg[i];
                 }
                 break;
             case 'h':
@@ -355,7 +348,7 @@ void parseOptions(int argc, char** argv)
     if (optind < argc)
     {
         FL_port = 1;
-        port = (int) strtol(argv[optind],NULL,10);
+        port = atoi(argv[optind]);
     }
 
     //check for argument errors
@@ -421,7 +414,7 @@ int protected_poll(struct pollfd *fds, nfds_t nfds, int timeout)
 				break;		
 		}
 
-		exit(1);
+		exit(2);
 	}
 
 	return ret;
@@ -482,7 +475,7 @@ int protected_open(const char* filepath, int flags, mode_t mode)
 				break;
 		}
 
-		exit(1);
+		exit(2);
 	}
 
 	return fd;
@@ -506,7 +499,7 @@ void protected_close(int fd)
 				break;
 		}		
 		
-		exit(1);
+		exit(2);
 	}
 }
 
@@ -531,7 +524,7 @@ int protected_read(int fd, char* buf, size_t size)
             	break;
         }
 		
-		exit(1);
+		exit(2);
 	}
 
 	return bytesRead;
@@ -573,7 +566,7 @@ int protected_write(int fd, const char* buf, size_t size)
                 break;
         }
 
-        exit(1);
+        exit(2);
 	}
 
 	return bytesWritten;
@@ -614,7 +607,7 @@ int protected_socket(int socket_family, int socket_type, int protocol)
             	break;
         }
 		
-		exit(1);
+		exit(2);
 	}
 
 	return ret;
@@ -647,6 +640,7 @@ void handleSocketInput()
 			{
 				FL_run = 0;
 
+				strcat(commandbuf,"\n");
 				logOutput(commandbuf);
 
 				break;
