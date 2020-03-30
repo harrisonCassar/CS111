@@ -19,7 +19,7 @@ Winter 2020 with Prof. Harry Xu.
 in the use of variable name "R" to represent the value of the thermoresistor internal to the thermometer sensor that we used for
 testing. When instead using a different name, the readings from the thermometer were able to be changed upon a simple "heating/cooling"
 of the physical sensor device being tested (whereas before with the use of "R" as the variable name, it seems nearly constant, which
-causes several automated test cases to automatically fail despite potentially testing something else... such as a change in the scale).
+causes several automated test cases to automatically fail despite potentially testing something else... such as a change in the scale between C and F, etc.).
 The assumption is that "R" refers to another definition of some global constant or variable that was declared in some included library
 that was unaccounted for. 
 
